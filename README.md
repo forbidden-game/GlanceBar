@@ -222,10 +222,10 @@ flowchart TD
 
 ### 下载与安装
 
-1. 前往 [GitHub Releases](https://github.com/forbidden-game/GlanceBar/releases/latest)，下载安装包 `GlanceBar-1.0.0-win-x64-Setup.exe` 及对应的 `.exe.sha256` 校验文件。
+1. 前往 [GitHub Releases](https://github.com/forbidden-game/GlanceBar/releases/latest)，下载安装包 `GlanceBar-1.0.1-win-x64-Setup.exe` 及对应的 `.exe.sha256` 校验文件。
 2. （可选）在 PowerShell 中使用以下命令校验完整性：
    ```powershell
-   Get-FileHash .\GlanceBar-1.0.0-win-x64-Setup.exe -Algorithm SHA256
+   Get-FileHash .\GlanceBar-1.0.1-win-x64-Setup.exe -Algorithm SHA256
    ```
 3. 运行安装程序，按提示完成安装。
    * 安装器会自动将程序注册至 `%ProgramFiles%\GlanceBar` 并启动服务；
@@ -256,6 +256,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-Release.ps1
 3. 调用 Inno Setup 编译器生成安装程序，在 `dist/` 输出安装器及 SHA256 校验文件。
 
 GitHub Actions 可手动构建安装包；推送与项目版本一致的 `v*` 标签会构建并上传至草稿 Release，确认产物后再发布。目标电脑只需要安装器，不需要 `gh`、Git、SDK 或打包工具。
+
+### 1.0.1 安装修复
+
+* 云端构建读取编译器自报版本，不依赖 `ISCC.exe` 的 Windows 文件版本字段。
+* 安装器只设置共享目录自身权限，不递归改写预存文件的 ACL。旧快照和服务错误日志在启动服务前解除链接并重建，避免将 SYSTEM 写入重定向到目录外；个人位置设置保留。
 
 ---
 

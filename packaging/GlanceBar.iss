@@ -272,12 +272,12 @@ begin
     RaiseException('Cannot create ' + DataDirectory);
 
 
-  { Reset old explicit ACLs, then replace inheritance with language-independent SIDs. }
-  RequireSystem('icacls.exe', '"' + DataDirectory + '" /reset /T /L');
+  { Secure only the directory; never recursively change ACLs on untrusted hard links. }
+  RequireSystem('icacls.exe', '"' + DataDirectory + '" /reset /L');
   RequireSystem('icacls.exe', '"' + DataDirectory + '" /inheritance:r /grant:r ' +
     '"*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"');
   { A pre-existing directory must not remain owned by an ordinary user. }
-  RequireSystem('icacls.exe', '"' + DataDirectory + '" /setowner "*S-1-5-32-544" /T /L');
+  RequireSystem('icacls.exe', '"' + DataDirectory + '" /setowner "*S-1-5-32-544" /L');
   { A pre-created file link must not redirect SYSTEM snapshot/log writes. }
   for Index := 0 to 2 do begin
     case Index of
@@ -288,6 +288,9 @@ begin
     if FileExists(DataFile) and
         ((GetFileAttributes(DataFile) and FILE_ATTRIBUTE_REPARSE_POINT) <> 0) then
       RaiseException('A GlanceBar data file must not be a symbolic link: ' + DataFile);
+    { Unlink old snapshots/logs before SYSTEM opens them; hard links are not reparse points. }
+    if FileExists(DataFile) and not DeleteFile(DataFile) then
+      RaiseException('Cannot replace the old GlanceBar data file: ' + DataFile);
   end;
 
   if ServiceState = 0 then Verb := 'create' else Verb := 'config';
