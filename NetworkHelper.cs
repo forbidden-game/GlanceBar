@@ -1,96 +1,28 @@
-using System.Diagnostics;
 using System.Globalization;
+using System.ServiceProcess;
 using System.Text;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal static class NetworkHelper
 {
-    internal const string HelperArgument = "--network-helper";
-    internal const string InstallArgument = "--install-network-helper";
-    internal const string UninstallArgument = "--uninstall-network-helper";
-    internal const string ScheduledTaskName = "TaskbarPulse Network Helper";
-    private const string MutexName = @"Global\TaskbarPulse.NetworkHelper.6D9AA8A2";
+    internal const string ServiceArgument = "--network-service";
+    internal const string ServiceName = "GlanceBarNetwork";
 
-    private static string DataDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "TaskbarPulse");
+    internal static string DataDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "GlanceBar");
 
     private static string SnapshotPath => Path.Combine(DataDirectory, "network-processes.tsv");
 
-    internal static int Run()
+    internal static int RunService()
     {
-        using var mutex = new Mutex(initiallyOwned: true, MutexName, out var isFirstInstance);
-        if (!isFirstInstance)
-        {
-            return 0;
-        }
-
-        using var sampler = new NetworkTraceSampler();
-        if (!sampler.IsAvailable)
-        {
-            return 2;
-        }
-
-        Directory.CreateDirectory(DataDirectory);
-        while (true)
-        {
-            Thread.Sleep(2000);
-            WriteSnapshot(sampler.TakeTop(2.0));
-        }
+        using var service = new NetworkService();
+        ServiceBase.Run(service);
+        return 0;
     }
 
-    internal static int Install()
-    {
-        var executable = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(executable))
-        {
-            return 3;
-        }
-
-        var create = RunTaskScheduler(
-            "/Create",
-            "/TN", ScheduledTaskName,
-            "/TR", $"\"{executable}\" {HelperArgument}",
-            "/SC", "ONLOGON",
-            "/RL", "HIGHEST",
-            "/F");
-        if (create != 0)
-        {
-            return create;
-        }
-
-        return RunTaskScheduler("/Run", "/TN", ScheduledTaskName);
-    }
-
-    internal static int Uninstall()
-    {
-        return RunTaskScheduler("/Delete", "/TN", ScheduledTaskName, "/F");
-    }
-
-    private static int RunTaskScheduler(params string[] arguments)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "schtasks.exe",
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo);
-        if (process is null)
-        {
-            return 4;
-        }
-        process.WaitForExit();
-        return process.ExitCode;
-    }
-
-    private static void WriteSnapshot(NetworkProcessUsage[] processes)
+    internal static void WriteSnapshot(NetworkProcessUsage[] processes)
     {
         var text = new StringBuilder(512);
         text.Append(DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture)).AppendLine();
@@ -112,18 +44,21 @@ internal static class NetworkHelper
         isFresh = false;
         try
         {
-            var lines = File.ReadAllLines(SnapshotPath, Encoding.UTF8);
-            if (lines.Length == 0 ||
-                !long.TryParse(lines[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks) ||
+            // The service replaces snapshots atomically; readers must allow replacement.
+            using var stream = new FileStream(SnapshotPath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            if (!long.TryParse(reader.ReadLine(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks) ||
+                ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks ||
                 DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc) > TimeSpan.FromSeconds(6))
             {
                 return [];
             }
 
-            var result = new List<NetworkProcessUsage>(Math.Min(5, lines.Length - 1));
-            for (var index = 1; index < lines.Length && result.Count < 5; index++)
+            var result = new List<NetworkProcessUsage>(5);
+            while (result.Count < 5 && reader.ReadLine() is { } line)
             {
-                var fields = lines[index].Split('\t');
+                var fields = line.Split('\t');
                 if (fields.Length != 4 ||
                     !int.TryParse(fields[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var processId) ||
                     !double.TryParse(fields[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var download) ||

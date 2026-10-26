@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal static unsafe class Native
 {

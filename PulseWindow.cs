@@ -3,12 +3,12 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal sealed class PulseWindow : IDisposable
 {
-    private const string ClassName = "TaskbarPulse.Window";
-    private const string InputClassName = "TaskbarPulse.Input";
+    private const string ClassName = "GlanceBar.Window";
+    private const string InputClassName = "GlanceBar.Input";
     private const nuint TimerId = 1;
     private const int LogicalWidth = 184;
     private const int CommandTaskManager = 1;
@@ -74,7 +74,7 @@ internal sealed class PulseWindow : IDisposable
         var error = Marshal.GetLastWin32Error();
         if (atom == 0 && error != 1410)
         {
-            throw new Win32Exception(error, "Cannot register the TaskbarPulse window class.");
+            throw new Win32Exception(error, "Cannot register the GlanceBar window class.");
         }
 
         var inputClass = new Native.WNDCLASS
@@ -88,7 +88,7 @@ internal sealed class PulseWindow : IDisposable
         error = Marshal.GetLastWin32Error();
         if (atom == 0 && error != 1410)
         {
-            throw new Win32Exception(error, "Cannot register the TaskbarPulse input window class.");
+            throw new Win32Exception(error, "Cannot register the GlanceBar input window class.");
         }
 
         _taskbar = Native.FindWindowW("Shell_TrayWnd", null);
@@ -97,7 +97,7 @@ internal sealed class PulseWindow : IDisposable
         _window = Native.CreateWindowExW(
             extendedStyle,
             ClassName,
-            "TaskbarPulse",
+            "GlanceBar",
             Native.WS_POPUP,
             0, 0, 1, 1,
             _taskbar,
@@ -107,7 +107,7 @@ internal sealed class PulseWindow : IDisposable
 
         if (_window == 0)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create the TaskbarPulse window.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create the GlanceBar window.");
         }
 
         _inputWindow = Native.CreateWindowExW(
@@ -122,7 +122,7 @@ internal sealed class PulseWindow : IDisposable
             0);
         if (_inputWindow == 0)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create the TaskbarPulse input window.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create the GlanceBar input window.");
         }
         Native.SetLayeredWindowAttributes(_inputWindow, 0, 1, Native.LWA_ALPHA);
 
@@ -171,7 +171,7 @@ internal sealed class PulseWindow : IDisposable
         catch (Exception exception)
         {
             File.AppendAllText(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarPulse-error.log"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GlanceBar-error.log"),
                 $"{DateTimeOffset.Now:O} Window message 0x{message:X}: {exception}\r\n");
             return Native.DefWindowProcW(hwnd, message, wParam, lParam);
         }
@@ -203,7 +203,7 @@ internal sealed class PulseWindow : IDisposable
         catch (Exception exception)
         {
             File.AppendAllText(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarPulse-error.log"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GlanceBar-error.log"),
                 $"{DateTimeOffset.Now:O} Input message 0x{message:X}: {exception}\r\n");
             return Native.DefWindowProcW(hwnd, message, wParam, lParam);
         }
@@ -645,7 +645,7 @@ internal sealed class PulseWindow : IDisposable
                 if (!_metrics.NetworkDetailsAvailable)
                 {
                     return new TooltipContent(topLines, "占用网速",
-                        [new TooltipRow(0, "正在等待后台网络采样授权")]);
+                        [new TooltipRow(0, "网络采样服务未运行，请重新运行安装程序修复")]);
                 }
                 if (_metrics.TopNetwork.Length == 0)
                 {
@@ -966,7 +966,7 @@ internal sealed class PulseWindow : IDisposable
             var startupFlags = Native.MF_STRING | (Startup.IsEnabled() ? Native.MF_CHECKED : 0);
             Native.AppendMenuW(menu, startupFlags, CommandStartup, "开机启动");
             Native.AppendMenuW(menu, Native.MF_SEPARATOR, 0, null);
-            Native.AppendMenuW(menu, Native.MF_STRING, CommandExit, "退出 TaskbarPulse");
+            Native.AppendMenuW(menu, Native.MF_STRING, CommandExit, "退出 GlanceBar");
             Native.SetForegroundWindow(_window);
 
             var command = Native.TrackPopupMenu(

@@ -1,7 +1,7 @@
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal readonly record struct NetworkProcessUsage(int ProcessId, string Name, double DownloadBytesPerSecond, double UploadBytesPerSecond);
 
@@ -16,30 +16,53 @@ internal sealed class NetworkTraceSampler : IDisposable
     private readonly Dictionary<int, string> _processNames = new();
     private readonly TraceEventSession? _session;
     private readonly Thread? _thread;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private Exception? _failure;
 
     internal bool IsAvailable { get; }
+    internal Exception? Failure => Volatile.Read(ref _failure);
 
     internal NetworkTraceSampler()
     {
         try
         {
-            var sessionName = $"TaskbarPulse.Network.{Environment.ProcessId}";
+            const string sessionName = "GlanceBar.Network";
             _session = new TraceEventSession(sessionName) { StopOnDispose = true };
             _session.EnableProvider(ProviderId, TraceEventLevel.Informational, NetworkKeywords);
             _session.Source.Dynamic.All += OnNetworkEvent;
-            _thread = new Thread(() => _session.Source.Process())
+            _thread = new Thread(ProcessEvents)
             {
                 IsBackground = true,
-                Name = "TaskbarPulse network trace"
+                Name = "GlanceBar network trace"
             };
             _thread.Start();
             IsAvailable = true;
         }
-        catch
+        catch (Exception exception)
         {
+            _failure = exception;
             _session?.Dispose();
             _session = null;
+        }
+    }
+
+    private void ProcessEvents()
+    {
+        try
+        {
+            _session!.Source.Process();
+            if (!_disposed)
+            {
+                Volatile.Write(ref _failure, new IOException("The network trace session ended unexpectedly."));
+            }
+        }
+        catch (Exception exception) when (!_disposed)
+        {
+            Volatile.Write(ref _failure, exception);
+        }
+        catch (Exception) when (_disposed)
+        {
+            // Closing the trace session interrupts its blocking reader.
         }
     }
 

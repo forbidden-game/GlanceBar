@@ -1,25 +1,32 @@
 using Microsoft.Win32;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal static class Program
 {
-    private const string MutexName = @"Local\TaskbarPulse.SingleInstance.6D9AA8A2";
+    private const string MutexName = @"Local\GlanceBar.SingleInstance.6D9AA8A2";
 
     [STAThread]
     private static int Main(string[] arguments)
     {
-        if (arguments.Contains(NetworkHelper.HelperArgument, StringComparer.OrdinalIgnoreCase))
+        if (arguments.Contains(NetworkHelper.ServiceArgument, StringComparer.OrdinalIgnoreCase))
         {
-            return NetworkHelper.Run();
+            return NetworkHelper.RunService();
         }
-        if (arguments.Contains(NetworkHelper.InstallArgument, StringComparer.OrdinalIgnoreCase))
+        if (arguments.Contains("--migrate-user", StringComparer.OrdinalIgnoreCase))
         {
-            return NetworkHelper.Install();
+            Installation.MigrateCurrentUser();
+            return 0;
         }
-        if (arguments.Contains(NetworkHelper.UninstallArgument, StringComparer.OrdinalIgnoreCase))
+        if (arguments.Contains("--configure-user", StringComparer.OrdinalIgnoreCase))
         {
-            return NetworkHelper.Uninstall();
+            Installation.ConfigureCurrentUser();
+            return 0;
+        }
+        if (arguments.Contains("--clear-user-settings", StringComparer.OrdinalIgnoreCase))
+        {
+            Installation.ClearCurrentUserSettings();
+            return 0;
         }
         using var mutex = new Mutex(initiallyOwned: true, MutexName, out var isFirstInstance);
         if (!isFirstInstance)
@@ -35,7 +42,7 @@ internal static class Program
         catch (Exception exception)
         {
             File.AppendAllText(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarPulse-error.log"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GlanceBar-error.log"),
                 $"{DateTimeOffset.Now:O} {exception}\r\n");
             return 1;
         }
@@ -45,7 +52,7 @@ internal static class Program
 internal static class Startup
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "TaskbarPulse";
+    private const string ValueName = "GlanceBar";
 
     internal static bool IsEnabled()
     {
@@ -55,13 +62,12 @@ internal static class Startup
 
     internal static void SetEnabled(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)
-            ?? throw new InvalidOperationException("Cannot open the current user's Run key.");
+        using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
 
         if (enabled)
         {
             var executable = Environment.ProcessPath
-                ?? throw new InvalidOperationException("Cannot locate TaskbarPulse.exe.");
+                ?? throw new InvalidOperationException("Cannot locate GlanceBar.exe.");
             key.SetValue(ValueName, $"\"{executable}\"", RegistryValueKind.String);
         }
         else
@@ -77,7 +83,7 @@ internal static class Startup
         return key?.GetValue("SystemUsesLightTheme") is int value && value != 0;
     }
 
-    private const string SettingsKeyPath = @"Software\TaskbarPulse";
+    private const string SettingsKeyPath = @"Software\GlanceBar";
     private const string PositionValueName = "TaskbarPosition";
 
     internal static int? GetTaskbarPosition()

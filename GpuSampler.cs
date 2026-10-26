@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal sealed class GpuSampler : IDisposable
 {

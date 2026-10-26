@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal readonly record struct CpuProcessUsage(int ProcessId, string Name, double Percent);
 internal readonly record struct MemoryProcessUsage(int ProcessId, string Name, long WorkingSetBytes);

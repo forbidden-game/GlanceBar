@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal sealed class MetricsSampler : IDisposable
 {

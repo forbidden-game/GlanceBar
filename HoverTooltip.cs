@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace TaskbarPulse;
+namespace GlanceBar;
 
 internal readonly record struct TooltipRow(int ProcessId, string Text);
 
@@ -15,7 +15,7 @@ internal sealed class TooltipContent(string[] topLines, string? sectionTitle, To
 
 internal sealed class HoverTooltip : IDisposable
 {
-    private const string ClassName = "TaskbarPulse.Tooltip";
+    private const string ClassName = "GlanceBar.Tooltip";
     private static HoverTooltip? _instance;
 
     private readonly Native.WindowProc _windowProc;
@@ -45,7 +45,7 @@ internal sealed class HoverTooltip : IDisposable
         var error = Marshal.GetLastWin32Error();
         if (atom == 0 && error != 1410)
         {
-            throw new Win32Exception(error, "Cannot register the TaskbarPulse tooltip class.");
+            throw new Win32Exception(error, "Cannot register the GlanceBar tooltip class.");
         }
 
         _window = Native.CreateWindowExW(
@@ -61,7 +61,7 @@ internal sealed class HoverTooltip : IDisposable
             0);
         if (_window == 0)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create the TaskbarPulse tooltip window.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create the GlanceBar tooltip window.");
         }
 
         Native.SetLayeredWindowAttributes(_window, 0, 244, Native.LWA_ALPHA);
