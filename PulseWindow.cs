@@ -10,7 +10,10 @@ internal sealed class PulseWindow : IDisposable
     private const string ClassName = "GlanceBar.Window";
     private const string InputClassName = "GlanceBar.Input";
     private const nuint TimerId = 1;
-    private const int LogicalWidth = 184;
+    // Leave room for the hardware glyphs and full-width metric readings at 100% DPI.
+    private const int LogicalWidth = 219;
+    private const int NetworkIconWidth = 9;
+    private const int HardwareIconWidth = 12;
     private const int CommandTaskManager = 1;
     private const int CommandStartup = 2;
     private const int CommandExit = 3;
@@ -814,15 +817,16 @@ internal sealed class PulseWindow : IDisposable
                 Native.SetBkMode(memoryDc, Native.TRANSPARENT);
                 Native.GetTextMetricsW(memoryDc, out var textMetrics);
 
-                var iconWidth = Scale(9);
+                var networkIconWidth = Scale(NetworkIconWidth);
+                var hardwareIconWidth = Scale(HardwareIconWidth);
                 var tinyGap = Scale(2);
                 var sectionGap = Scale(5);
                 var totalWidth =
-                    iconWidth + tinyGap + Measure(memoryDc, _downloadText) + sectionGap +
-                    iconWidth + tinyGap + Measure(memoryDc, _uploadText) + sectionGap +
-                    iconWidth + tinyGap + Measure(memoryDc, _cpuText) + sectionGap +
-                    iconWidth + tinyGap + Measure(memoryDc, _gpuText) + sectionGap +
-                    iconWidth + tinyGap + Measure(memoryDc, _memoryText);
+                    networkIconWidth + tinyGap + Measure(memoryDc, _downloadText) + sectionGap +
+                    networkIconWidth + tinyGap + Measure(memoryDc, _uploadText) + sectionGap +
+                    hardwareIconWidth + tinyGap + Measure(memoryDc, _cpuText) + sectionGap +
+                    hardwareIconWidth + tinyGap + Measure(memoryDc, _gpuText) + sectionGap +
+                    hardwareIconWidth + tinyGap + Measure(memoryDc, _memoryText);
 
                 var x = Math.Max(Scale(5), (client.Width - totalWidth) / 2);
                 var y = Math.Max(0, (client.Height - textMetrics.height) / 2);
@@ -858,53 +862,83 @@ internal sealed class PulseWindow : IDisposable
         }
     }
 
+    // Draw compact, DPI-scaled status glyphs and return the start of the following gap.
     private int DrawStatusIcon(nint hdc, int x, int y, int textHeight, StatusIcon icon, uint color)
     {
-        var size = Scale(8);
+        var hardware = icon is StatusIcon.Cpu or StatusIcon.Gpu or StatusIcon.Memory;
+        // Scale grid coordinates independently so fractional DPI keeps the geometry aligned.
+        Span<int> unit = stackalloc int[HardwareIconWidth];
+        if (hardware)
+        {
+            for (var coordinate = 1; coordinate < unit.Length; coordinate++)
+            {
+                unit[coordinate] = Scale(coordinate);
+            }
+        }
+        var one = hardware ? unit[1] : Scale(1);
+        var size = hardware ? unit[HardwareIconWidth - 1] : Scale(NetworkIconWidth - 1);
         var left = x;
         var top = y + Math.Max(0, (textHeight - size) / 2);
         var right = left + size;
         var bottom = top + size;
         var centerX = (left + right) / 2;
         var centerY = (top + bottom) / 2;
-        var pen = Native.CreatePen(Native.PS_SOLID, Math.Max(1, Scale(1)), color);
+        var pen = Native.CreatePen(Native.PS_SOLID, Math.Max(1, one), color);
         var oldPen = Native.SelectObject(hdc, pen);
 
         switch (icon)
         {
             case StatusIcon.Download:
-                DrawLine(hdc, centerX, top, centerX, bottom - Scale(1));
-                DrawLine(hdc, centerX, bottom - Scale(1), left + Scale(1), centerY);
-                DrawLine(hdc, centerX, bottom - Scale(1), right - Scale(1), centerY);
+                DrawLine(hdc, centerX, top, centerX, bottom - one);
+                DrawLine(hdc, centerX, bottom - one, left + one, centerY);
+                DrawLine(hdc, centerX, bottom - one, right - one, centerY);
                 break;
             case StatusIcon.Upload:
-                DrawLine(hdc, centerX, bottom, centerX, top + Scale(1));
-                DrawLine(hdc, centerX, top + Scale(1), left + Scale(1), centerY);
-                DrawLine(hdc, centerX, top + Scale(1), right - Scale(1), centerY);
+                DrawLine(hdc, centerX, bottom, centerX, top + one);
+                DrawLine(hdc, centerX, top + one, left + one, centerY);
+                DrawLine(hdc, centerX, top + one, right - one, centerY);
                 break;
             case StatusIcon.Cpu:
-                DrawBox(hdc, left + Scale(1), top + Scale(1), right - Scale(1), bottom - Scale(1));
-                DrawLine(hdc, left, top + Scale(2), left + Scale(1), top + Scale(2));
-                DrawLine(hdc, left, bottom - Scale(2), left + Scale(1), bottom - Scale(2));
-                DrawLine(hdc, right - Scale(1), top + Scale(2), right, top + Scale(2));
-                DrawLine(hdc, right - Scale(1), bottom - Scale(2), right, bottom - Scale(2));
+                // A square package, central die, and two pins on each side.
+                DrawBox(hdc, left + unit[2], top + unit[2], left + unit[8], top + unit[8]);
+                DrawBox(hdc, left + unit[4], top + unit[4], left + unit[6], top + unit[6]);
+                for (var pin = 4; pin <= 6; pin += 2)
+                {
+                    var offset = unit[pin];
+                    DrawLine(hdc, left + offset, top, left + offset, top + unit[2]);
+                    DrawLine(hdc, left + offset, top + unit[8], left + offset, top + unit[11]);
+                    DrawLine(hdc, left, top + offset, left + unit[2], top + offset);
+                    DrawLine(hdc, left + unit[8], top + offset, left + unit[11], top + offset);
+                }
                 break;
             case StatusIcon.Gpu:
-                DrawBox(hdc, left, top, right, bottom - Scale(2));
-                DrawLine(hdc, centerX, bottom - Scale(2), centerX, bottom);
-                DrawLine(hdc, left + Scale(2), bottom, right - Scale(2), bottom);
+                // The bracket and edge contacts distinguish the card from a monitor.
+                DrawLine(hdc, left, top + unit[1], left, top + unit[10]);
+                DrawBox(hdc, left + unit[1], top + unit[2], left + unit[10], top + unit[8]);
+                DrawLine(hdc, left + unit[6], top + unit[3], left + unit[8], top + unit[5]);
+                DrawLine(hdc, left + unit[8], top + unit[5], left + unit[6], top + unit[7]);
+                DrawLine(hdc, left + unit[6], top + unit[7], left + unit[4], top + unit[5]);
+                DrawLine(hdc, left + unit[4], top + unit[5], left + unit[6], top + unit[3]);
+                DrawLine(hdc, left + unit[4], top + unit[8], left + unit[4], top + unit[11]);
+                DrawLine(hdc, left + unit[7], top + unit[8], left + unit[7], top + unit[11]);
                 break;
             case StatusIcon.Memory:
-                DrawBox(hdc, left, top, right, bottom);
-                DrawLine(hdc, left + Scale(2), top + Scale(2), right - Scale(2), top + Scale(2));
-                DrawLine(hdc, left + Scale(2), centerY, right - Scale(2), centerY);
-                DrawLine(hdc, left + Scale(2), bottom - Scale(2), right - Scale(2), bottom - Scale(2));
+                // Three memory chips sit above the contacts of a DIMM.
+                DrawBox(hdc, left, top + unit[2], left + unit[10], top + unit[7]);
+                for (var chip = 2; chip <= 8; chip += 3)
+                {
+                    DrawLine(hdc, left + unit[chip], top + unit[4], left + unit[chip], top + unit[6]);
+                }
+                for (var pin = 2; pin <= 8; pin += 2)
+                {
+                    DrawLine(hdc, left + unit[pin], top + unit[7], left + unit[pin], top + unit[10]);
+                }
                 break;
         }
 
         Native.SelectObject(hdc, oldPen);
         Native.DeleteObject(pen);
-        return x + Scale(9);
+        return x + Scale(hardware ? HardwareIconWidth : NetworkIconWidth);
     }
 
     private static void DrawLine(nint hdc, int x1, int y1, int x2, int y2)
