@@ -20,6 +20,7 @@ internal sealed class MetricsSampler : IDisposable
     private bool _disposed;
 
     internal double CpuPercent { get; private set; }
+    internal double? CpuTemperature => _details.CpuTemperature;
     internal double GpuPercent { get; private set; } = -1;
     internal uint MemoryPercent { get; private set; }
     internal ulong TotalMemoryBytes { get; private set; }

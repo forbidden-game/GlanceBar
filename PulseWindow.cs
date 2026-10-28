@@ -11,7 +11,7 @@ internal sealed class PulseWindow : IDisposable
     private const string InputClassName = "GlanceBar.Input";
     private const nuint TimerId = 1;
     // Leave room for the hardware glyphs and full-width metric readings at 100% DPI.
-    private const int LogicalWidth = 219;
+    private const int LogicalWidth = 257;
     private const int NetworkIconWidth = 9;
     private const int HardwareIconWidth = 12;
     private const int CommandTaskManager = 1;
@@ -27,6 +27,7 @@ internal sealed class PulseWindow : IDisposable
     private readonly StringBuilder _downloadText = new(12);
     private readonly StringBuilder _uploadText = new(12);
     private readonly StringBuilder _cpuText = new(4);
+    private readonly StringBuilder _cpuTemperatureText = new(8);
     private readonly StringBuilder _gpuText = new(4);
     private readonly StringBuilder _memoryText = new(4);
 
@@ -300,6 +301,16 @@ internal sealed class PulseWindow : IDisposable
         FormatRate(_downloadText, _metrics.DownloadBytesPerSecond);
         FormatRate(_uploadText, _metrics.UploadBytesPerSecond);
         FormatPercent(_cpuText, _metrics.CpuPercent);
+        _cpuTemperatureText.Clear().Append(' ');
+        if (_metrics.CpuTemperature is double temperature)
+        {
+            _cpuTemperatureText.Append(temperature.ToString("0", CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            _cpuTemperatureText.Append('–');
+        }
+        _cpuTemperatureText.Append("°C");
         FormatPercent(_gpuText, _metrics.GpuPercent);
         _memoryText.Clear().Append(Math.Min(_metrics.MemoryPercent, 100));
         PadLeft(_memoryText, 3);
@@ -684,7 +695,7 @@ internal sealed class PulseWindow : IDisposable
                     rows.Add(new TooltipRow(0, "暂无明显 CPU 活动"));
                 }
                 return new TooltipContent(
-                    [$"CPU  {Math.Round(_metrics.CpuPercent)}%"],
+                    [$"CPU  {Math.Round(_metrics.CpuPercent)}%    温度  {_cpuTemperatureText.ToString().TrimStart()}"],
                     "占用 CPU",
                     rows.ToArray());
             }
@@ -825,6 +836,7 @@ internal sealed class PulseWindow : IDisposable
                     networkIconWidth + tinyGap + Measure(memoryDc, _downloadText) + sectionGap +
                     networkIconWidth + tinyGap + Measure(memoryDc, _uploadText) + sectionGap +
                     hardwareIconWidth + tinyGap + Measure(memoryDc, _cpuText) + sectionGap +
+                    Measure(memoryDc, _cpuTemperatureText) +
                     hardwareIconWidth + tinyGap + Measure(memoryDc, _gpuText) + sectionGap +
                     hardwareIconWidth + tinyGap + Measure(memoryDc, _memoryText);
 
@@ -838,7 +850,8 @@ internal sealed class PulseWindow : IDisposable
                 x = Draw(memoryDc, x, y, _uploadText, textColor) + sectionGap;
                 _networkEnd = x - sectionGap / 2;
                 x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Cpu, mutedColor) + tinyGap;
-                x = Draw(memoryDc, x, y, _cpuText, textColor) + sectionGap;
+                x = Draw(memoryDc, x, y, _cpuText, textColor);
+                x = Draw(memoryDc, x, y, _cpuTemperatureText, textColor) + sectionGap;
                 _cpuEnd = x - sectionGap / 2;
                 x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Gpu, mutedColor) + tinyGap;
                 x = Draw(memoryDc, x, y, _gpuText, textColor) + sectionGap;

@@ -15,6 +15,7 @@ internal sealed class ProcessDetailsSampler : IDisposable
     internal MemoryProcessUsage[] TopMemory { get; private set; } = [];
     internal NetworkProcessUsage[] TopNetwork { get; private set; } = [];
     internal bool NetworkDetailsAvailable { get; private set; }
+    internal double? CpuTemperature { get; private set; }
 
     internal void Sample(double elapsedSeconds)
     {
@@ -67,8 +68,9 @@ internal sealed class ProcessDetailsSampler : IDisposable
 
         TopCpu = topCpu[..cpuCount];
         TopMemory = topMemory[..memoryCount];
-        TopNetwork = NetworkHelper.ReadSnapshot(out var isFresh);
+        TopNetwork = NetworkHelper.ReadSnapshot(out var isFresh, out var cpuTemperature);
         NetworkDetailsAvailable = isFresh;
+        CpuTemperature = cpuTemperature;
 
         if (_generation % 30 == 0)
         {

@@ -22,10 +22,12 @@ internal static class NetworkHelper
         return 0;
     }
 
-    internal static void WriteSnapshot(NetworkProcessUsage[] processes)
+    // Publish network usage and the latest CPU temperature as one atomic snapshot.
+    internal static void WriteSnapshot(NetworkProcessUsage[] processes, double? cpuTemperature)
     {
         var text = new StringBuilder(512);
-        text.Append(DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture)).AppendLine();
+        text.Append(DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture)).Append('\t')
+            .Append(cpuTemperature?.ToString("R", CultureInfo.InvariantCulture) ?? "").AppendLine();
         foreach (var process in processes)
         {
             text.Append(process.ProcessId).Append('\t')
@@ -39,21 +41,31 @@ internal static class NetworkHelper
         File.Move(temporary, SnapshotPath, overwrite: true);
     }
 
-    internal static NetworkProcessUsage[] ReadSnapshot(out bool isFresh)
+    // Reject stale snapshots so a stopped service cannot leave a misleading temperature.
+    internal static NetworkProcessUsage[] ReadSnapshot(out bool isFresh, out double? cpuTemperature)
     {
         isFresh = false;
+        cpuTemperature = null;
         try
         {
             // The service replaces snapshots atomically; readers must allow replacement.
             using var stream = new FileStream(SnapshotPath, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(stream, Encoding.UTF8);
-            if (!long.TryParse(reader.ReadLine(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks) ||
+            var header = reader.ReadLine()?.Split('\t');
+            if (header is null || header.Length != 2 ||
+                !long.TryParse(header[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks) ||
                 ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks ||
                 DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc) > TimeSpan.FromSeconds(6))
             {
                 return [];
             }
+            if (double.TryParse(header[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature) &&
+                double.IsFinite(temperature))
+            {
+                cpuTemperature = temperature;
+            }
+
 
             var result = new List<NetworkProcessUsage>(5);
             while (result.Count < 5 && reader.ReadLine() is { } line)

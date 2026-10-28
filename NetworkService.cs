@@ -42,6 +42,16 @@ internal sealed class NetworkService : ServiceBase
 
     private void SampleLoop()
     {
+        CpuTemperatureSampler? temperatureSampler = null;
+        try
+        {
+            temperatureSampler = new CpuTemperatureSampler();
+        }
+        catch (Exception exception)
+        {
+            // Hardware access is optional; network collection must remain available.
+            WriteFailure(exception);
+        }
         var timestamp = Stopwatch.GetTimestamp();
         try
         {
@@ -54,7 +64,21 @@ internal sealed class NetworkService : ServiceBase
                 }
                 var now = Stopwatch.GetTimestamp();
                 var elapsed = (now - timestamp) / (double)Stopwatch.Frequency;
-                NetworkHelper.WriteSnapshot(sampler.TakeTop(elapsed));
+                double? temperature = null;
+                if (temperatureSampler is not null)
+                {
+                    try
+                    {
+                        temperature = temperatureSampler.Sample();
+                    }
+                    catch (Exception exception)
+                    {
+                        WriteFailure(exception);
+                        temperatureSampler.Dispose();
+                        temperatureSampler = null;
+                    }
+                }
+                NetworkHelper.WriteSnapshot(sampler.TakeTop(elapsed), temperature);
                 timestamp = now;
             }
         }
@@ -64,6 +88,10 @@ internal sealed class NetworkService : ServiceBase
             // A failed collector must not appear healthy to SCM or leave fresh-looking stale data.
             _sampler?.Dispose();
             Environment.Exit(1);
+        }
+        finally
+        {
+            temperatureSampler?.Dispose();
         }
     }
 

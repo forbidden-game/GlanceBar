@@ -7,6 +7,9 @@
 #ifndef InstallerOutputDir
   #define InstallerOutputDir "..\dist"
 #endif
+#ifndef PawnIoSetup
+  #error PawnIoSetup must be supplied by scripts/Build-Release.ps1.
+#endif
 
 [Setup]
 AppId={{74539364-8DF4-45DC-B64F-467F6DB10C48}
@@ -38,6 +41,7 @@ ChangesEnvironment=no
 Name: "startup"; Description: "Start GlanceBar when I sign in"; Flags: checkedonce
 
 [Files]
+Source: "{#PawnIoSetup}"; Flags: dontcopy
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -45,7 +49,7 @@ Name: "{group}\GlanceBar"; Filename: "{app}\GlanceBar.exe"; WorkingDir: "{app}"
 Name: "{group}\Uninstall GlanceBar"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\GlanceBar.exe"; Description: "Launch GlanceBar"; Flags: runasoriginaluser nowait postinstall skipifsilent; Check: CanUseOriginalUser
+Filename: "{app}\GlanceBar.exe"; Description: "Launch GlanceBar"; Flags: runasoriginaluser nowait postinstall skipifsilent; Check: CanLaunchOriginalUser
 
 [Code]
 const
@@ -69,7 +73,7 @@ type
   end;
 
 var
-  OriginalUserChecked, OriginalUserAvailable, InstallationFailed: Boolean;
+  OriginalUserChecked, OriginalUserAvailable, InstallationFailed, PawnIoNeedsRestart: Boolean;
 
 function OpenSCManager(MachineName, DatabaseName: String; Access: LongWord): THandle;
   external 'OpenSCManagerW@advapi32.dll stdcall';
@@ -220,6 +224,12 @@ begin
   Result := OriginalUserAvailable and not InstallationFailed;
 end;
 
+{ Do not open the UI until a driver-requested restart has completed. }
+function CanLaunchOriginalUser: Boolean;
+begin
+  Result := CanUseOriginalUser and not PawnIoNeedsRestart;
+end;
+
 procedure RequireOriginalUser(const Argument: String);
 var
   ExitCode: Integer;
@@ -257,6 +267,55 @@ begin
   except
     Result := GetExceptionMessage;
   end;
+end;
+
+{ Preserve a shared newer driver; the bundled library requires PawnIO 2.2 or later. }
+function PawnIoNeedsInstall: Boolean;
+var
+  Version, MajorText, MinorText: String;
+  Separator, Major, Minor: Integer;
+begin
+  Result := True;
+  if not RegQueryStringValue(HKLM64,
+      'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO',
+      'DisplayVersion', Version) then Exit;
+  Separator := Pos('.', Version);
+  if Separator = 0 then
+    RaiseException('Cannot determine the installed PawnIO version: ' + Version);
+  MajorText := Copy(Version, 1, Separator - 1);
+  Delete(Version, 1, Separator);
+  Separator := Pos('.', Version);
+  if Separator > 0 then MinorText := Copy(Version, 1, Separator - 1)
+  else MinorText := Version;
+  Major := StrToIntDef(MajorText, -1);
+  Minor := StrToIntDef(MinorText, -1);
+  if (Major < 0) or (Minor < 0) then
+    RaiseException('Cannot determine the installed PawnIO version.');
+  Result := (Major < 2) or ((Major = 2) and (Minor < 2));
+end;
+
+{ Install the signed driver before starting the collector; 3010 requests a reboot. }
+procedure InstallPawnIo;
+var
+  ExitCode: Integer;
+begin
+  if not PawnIoNeedsInstall then begin
+    Log('A compatible PawnIO version is already installed.');
+    Exit;
+  end;
+  ExtractTemporaryFile('PawnIO_setup.exe');
+  if not Exec(ExpandConstant('{tmp}\PawnIO_setup.exe'), '-install -silent', '',
+      SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+    RaiseException('Cannot start the PawnIO installer: ' + SysErrorMessage(ExitCode));
+  if ExitCode = 3010 then PawnIoNeedsRestart := True
+  else if ExitCode <> 0 then
+    RaiseException('PawnIO installation failed with exit code ' + IntToStr(ExitCode) + '.');
+end;
+
+{ Let Inno Setup report the reboot requested by the driver installer. }
+function NeedRestart: Boolean;
+begin
+  Result := PawnIoNeedsRestart;
 end;
 
 procedure InstallNetworkService;
@@ -312,6 +371,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     InstallationFailed := True;
+    InstallPawnIo;
     InstallNetworkService;
     InstallationFailed := False;
     if not WizardSilent then begin

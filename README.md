@@ -48,10 +48,9 @@
 
 ```text
  ┌─── Windows 11 任务栏 (Taskbar) ────────────────────────────────────────────────────────┐
- │ [⊞] [🔍] [Widgets] [Apps...]               ↓ 12.5M  ↑ 1.2M   ▣ 24   ◈ 18   ▥ 57       │
+ │ [⊞] [🔍] [Widgets] [Apps...]          ↓ 12.5M  ↑ 1.2M   ▣ 24  56°C   ◈ 18   ▥ 57    │
  └────────────────────────────────────────────────────────────────────────────────────────┘
-                                               └──┬──┘  └──┬─┘   └─┬─┘   └─┬─┘   └─┬─┘
-                                                下载速度  上传速度  CPU负载 GPU负载 内存占比
+                                         下载速度  上传速度  CPU负载和温度  GPU负载 内存占比
 ```
 
 * **自适应色谱**：
@@ -68,7 +67,7 @@
 
 ```text
 ┌── 悬停在【网速】区域 ──────────────────────┐  ┌── 悬停在【CPU】区域 ───────────────────────┐
-│ 网速 · Wi-Fi 6 (Intel Wi-Fi 6 AX200)      │  │ CPU  24%                                 │
+│ 网速 · Wi-Fi 6 (Intel Wi-Fi 6 AX200)      │  │ CPU  24%    温度  56°C                   │
 │ 下载 12.50 MB/s       上传 1.18 MB/s      │  │                                          │
 │ ────────────────────────────────────────  │  │ 占用 CPU 排行                            │
 │ 占用网速                                  │  │  🎨 Photoshop.exe                 14.2%  │
@@ -166,10 +165,11 @@ flowchart TD
         ETW["内核网络事件 (ETW Network Trace)"]
         PDH["性能计数器 (PDH Engine)"]
         SYS["系统时间与内存 (GetSystemTimes / MEMORYSTATUSEX)"]
+        CPU["CPU 温度传感器 (PawnIO)"]
     end
 
     subgraph ServiceSpace ["后台服务 (LocalSystem 权限)"]
-        SVC["GlanceBarNetwork (后台服务)\n• 订阅 ETW 内核网络事件\n• 聚合各 PID 流量\n• 原子写入只读快照"]
+        SVC["GlanceBarNetwork (后台服务)\n• 订阅 ETW 网络事件\n• 采集 CPU 温度\n• 原子写入只读快照"]
     end
 
     subgraph UserSpace ["用户界面层 (普通用户权限)"]
@@ -185,6 +185,7 @@ flowchart TD
     end
 
     ETW -->|TraceEvent 监听| SVC
+    CPU -->|LibreHardwareMonitor| SVC
     SVC -->|每 2 秒原子刷写| TSV
     TSV -->|只读打开| SAMPLER
     PDH -->|GPU 负载| SAMPLER
@@ -202,7 +203,7 @@ flowchart TD
 
 ### 2. ETW 进程网络统计（权限解耦服务）
 * 获取进程级实时网络流量需要内核级 ETW 监听权限。为了保证日常使用安全，GlanceBar 进行了**权限分离设计**：
-  * **后台服务 (`GlanceBarNetwork`)**：以系统服务方式运行，专注于通过 `Microsoft.Diagnostics.Tracing.TraceEvent` 订阅网络事件并汇总统揽各 PID 的吞吐量，每 2 秒以原子替换方式向 `%ProgramData%\GlanceBar\network-processes.tsv` 写入只读快照（**绝不记录或分析任何数据包具体载荷，纯数字聚合**）。
+  * **后台服务 (`GlanceBarNetwork`)**：以系统服务方式运行，通过 `Microsoft.Diagnostics.Tracing.TraceEvent` 汇总各 PID 的网络吞吐量，并通过 LibreHardwareMonitor 读取 CPU 温度；每 2 秒以原子替换方式向 `%ProgramData%\GlanceBar\network-processes.tsv` 写入只读快照。网络采样不记录或分析数据包载荷。
   * **前端界面 (`GlanceBar.exe`)**：始终以普通用户权限运行，只读消费 TSV 快照并绘制界面，最大程度保障系统安全性。
 
 ### 3. 多 GPU 引擎聚合（PDH）
@@ -217,8 +218,8 @@ flowchart TD
 
 ### 系统与环境要求
 * **已验证支持系统**：Windows 11 x64（推荐使用最新稳定版）
-* **终端使用者**：**无需预装任何运行库**（已包含所有依赖，无需安装 .NET SDK / .NET Runtime / Inno Setup 等）。
-* **权限要求**：安装器需要一次性管理员权限（用于部署程序文件与注册网络采集服务）；日常运行界面仅需普通用户权限。
+* **终端使用者**：无需额外安装运行库或驱动；安装包已包含所需组件。
+* **权限要求**：安装器需要一次性管理员权限，用于部署程序文件、采集服务和 CPU 温度所需的 PawnIO 内核驱动；日常运行界面仅需普通用户权限。
 
 ### 下载与安装
 
@@ -228,9 +229,11 @@ flowchart TD
    Get-FileHash .\GlanceBar-1.0.1-win-x64-Setup.exe -Algorithm SHA256
    ```
 3. 运行安装程序，按提示完成安装。
-   * 安装器会自动将程序注册至 `%ProgramFiles%\GlanceBar` 并启动服务；
+   * 安装器会自动部署 PawnIO 驱动、将程序注册至 `%ProgramFiles%\GlanceBar` 并启动采集服务；如果已有较新版本的 PawnIO，则直接使用；
    * 勾选“开机自启”可在当前用户登录时自动运行。
-4. 安装完成后，GlanceBar 将立即在任务栏呈现。按住鼠标左键即可拖动到你喜爱的位置。
+4. 安装完成后，GlanceBar 将在任务栏呈现。按住鼠标左键即可拖动到你喜爱的位置。若驱动安装要求重启，请先重启电脑。
+
+CPU 温度优先显示封装或芯片温度；没有对应传感器时显示最高核心温度。硬件不支持、驱动不可用或服务未运行时显示 `–°C`，其他指标仍可使用。
 
 安装器目前未做代码签名，SmartScreen 可能显示“未知发布者”。请核对下载来源及 SHA256 校验值，并遵循组织安全策略；不要关闭 Defender。SHA256 仅验证文件完整性，不等同于发布者签名。
 
@@ -251,8 +254,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-Release.ps1
 ```
 
 构建脚本将自动完成：
-1. 编译发布 `.NET 10` 自包含单文件（SingleFile, Self-Contained, 保留 TraceEvent 所需反射路径）；
-2. 收集第三方依赖版权许可及 Notice 文件；
+1. 下载并验证固定版本的官方 PawnIO 安装器；
+2. 编译发布 `.NET 10` 自包含单文件，并收集第三方许可及 PawnIO 源码；
 3. 调用 Inno Setup 编译器生成安装程序，在 `dist/` 输出安装器及 SHA256 校验文件。
 
 GitHub Actions 可手动构建安装包；推送与项目版本一致的 `v*` 标签会构建并上传至草稿 Release，确认产物后再发布。目标电脑只需要安装器，不需要 `gh`、Git、SDK 或打包工具。
@@ -268,7 +271,7 @@ GitHub Actions 可手动构建安装包；推送与项目版本一致的 `v*` �
 
 可在 Windows **设置 → 应用 → 已安装的应用 → GlanceBar → 卸载**，或运行安装目录下的 `unins000.exe`。
 
-卸载过程将自动停止并注销 `GlanceBarNetwork` 服务，清理共享快照数据与程序文件。
+卸载过程将自动停止并注销 `GlanceBarNetwork` 服务，清理共享快照数据与程序文件。PawnIO 可能被其他硬件监控软件共用，因此不会随 GlanceBar 一起卸载。
 
 > [!NOTE]
 > 若需在卸载前连同当前用户的注册表个性化记忆（如拖拽停靠坐标、自启开关）一并彻底清除，可以当前用户身份在终端中执行：
@@ -283,7 +286,7 @@ GitHub Actions 可手动构建安装包；推送与项目版本一致的 `v*` �
 <details>
 <summary><b>Q1: 为什么安装时需要管理员权限？</b></summary>
 <br/>
-Windows 内核出于安全隔离机制，普通权限进程无法直接抓取各独立进程的网络 ETW 流量。因此 GlanceBar 将 ETW 采样独立为一个小型的本地 Windows 服务（GlanceBarNetwork），安装该服务需要管理员权限。而在日常使用中，主界面 UI 完全以当前登录的普通用户权限运行，无需且不建议提权。
+安装器需要管理员权限以注册网络采集服务和安装 PawnIO 驱动；前者用于按进程统计网络流量，后者用于读取 CPU 温度。日常使用时主界面以普通用户权限运行，无需提权。
 </details>
 
 <details>
@@ -309,7 +312,7 @@ Windows 内核出于安全隔离机制，普通权限进程无法直接抓取各
 ## 📜 许可证与鸣谢
 
 * 本项目使用 [MIT License](LICENSE)，Copyright (c) 2026 eipi10。
-* 安装包附带 .NET 运行时和 `TraceEvent` 等依赖的 `THIRD-PARTY-NOTICES.txt`；各依赖按其各自许可证提供。
+* 安装包附带 .NET 运行时、LibreHardwareMonitor、PawnIO 等依赖的第三方许可和 PawnIO 源码；各依赖按其各自许可证提供。
 
 <div align="center">
 
