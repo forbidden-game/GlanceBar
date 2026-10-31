@@ -1,339 +1,83 @@
-<div align="center">
+# GlanceBar
 
-# ⚡ GlanceBar (任务栏脉搏)
+适用于 Windows 11 (x64) 的轻量任务栏资源监视器。直接贴合在任务栏上显示实时网速、CPU、GPU 和内存状态，鼠标悬停即可查看占用最高的进程。
 
-**轻若微风、直观灵动的 Windows 任务栏极简硬件状态监视器**  
-*Featherlight, Transparent & Native Hardware Performance Monitor for Windows Taskbar*
+## 功能与交互
 
-<br/>
+- **任务栏常驻指标**：实时显示 `↓ 下载速度`、`↑ 上传速度`、`CPU 占用率与温度`、`GPU 占用率`、`内存占用率`。
+- **悬停查看详情**：鼠标移至对应指标区域时弹出明细卡片：
+  - **网速**：当前活动网卡名称、上下行速率，以及流量最高的 Top 5 进程。
+  - **CPU**：总占用率、温度，以及 CPU 占用最高的 Top 5 进程。
+  - **GPU**：当前最繁忙图形引擎的负载百分比。
+  - **内存**：已用 / 总物理内存，以及工作集（Working Set）最大的 Top 5 进程。
+- **自适应外观**：基于纯 Win32 GDI 绘制，支持任务栏透明贴合、系统深浅色主题切换、Per-Monitor V2 高 DPI 缩放，并在全屏游戏或演示模式下自动隐藏。
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2011%20(x64)-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
-[![Runtime](https://img.shields.io/badge/.NET-10.0%20(win--x64)-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![GUI Engine](https://img.shields.io/badge/GUI-Pure%20Win32%20GDI-informational?style=for-the-badge&logo=csharp&logoColor=white)](https://docs.microsoft.com/windows/win32/)
-[![Memory Footprint](https://img.shields.io/badge/Memory-Ultra--Low-brightgreen?style=for-the-badge&logo=speedtest&logoColor=white)](#-为什么做它与传统工具对比)
-[![Single File](https://img.shields.io/badge/Publish-Self--Contained-orange?style=for-the-badge&logo=box&logoColor=white)](#-快速开始)
+### 鼠标操作
 
-<br/>
+| 操作 | 作用 |
+| :--- | :--- |
+| **鼠标悬停** | 显示对应指标的详细数值与 Top 5 进程排行 |
+| **左键拖拽** | 在任务栏空白区域移动停靠位置（松开后自动保存至 `HKCU\Software\GlanceBar`） |
+| **左键单击** | 打开 Windows 任务管理器（`taskmgr.exe`） |
+| **右键单击** | 打开菜单：打开任务管理器、切换开机自启、退出程序 |
 
-*「将机器的心跳，轻柔无感地融进任务栏的呼吸之中。」*
+## 安装与卸载
 
-[💡 设计哲学](#-设计哲学) • [🖥️ 视觉与交互](#️-视觉与交互全景) • [✨ 核心亮点](#-核心亮点) • [📊 对比传统工具](#-与传统工具对比) • [🛠️ 底层架构](#️-底层硬核技术揭秘) • [🚀 快速开始](#-快速开始) • [❓ 常见问题](#-常见问题-faq)
+### 系统要求
 
-</div>
+- **操作系统**：Windows 11 x64（Build 22000 及以上）
+- **运行权限**：安装过程需要管理员权限，用于注册后台采集服务 `GlanceBarNetwork` 及安装读取 CPU 温度所需的 `PawnIO` 驱动；日常界面以普通用户权限运行。
 
----
+### 安装
 
-## 💡 设计哲学
+1. 前往 [GitHub Releases](https://github.com/forbidden-game/GlanceBar/releases/latest) 下载最新的 `GlanceBar-<版本>-win-x64-Setup.exe`（可通过同目录下的 `.sha256` 文件校验完整性）。
+2. 运行安装程序并按提示完成安装。若首次安装 `PawnIO` 驱动提示需要重启系统，请重启后再使用。
 
-日常使用 PC 时，我们常常好奇或需要关注：“现在网速有多快？”、“是什么程序在偷偷吃 CPU？”、“为什么内存又满了？”。
+> **说明**：安装器目前未进行 Authenticode 代码签名，Windows SmartScreen 可能会提示“未知发布者”。如果是静默安装或从已提权终端启动安装器，安装后请在目标普通用户会话中直接运行 `GlanceBar.exe`，或执行 `GlanceBar.exe --configure-user` 完成当前用户配置。
 
-然而市面上的监控工具总有些令人妥协的遗憾：
-* **独立桌面悬浮窗**：遮挡壁纸或工作窗口，切全屏时容易误触，视觉风格与 Windows 11 Fluent 风格割裂。
-* **现代 Webview/Electron 类小挂件**：仅为了看个网速就常驻消耗数百兆内存与额外 GPU 资源，本末倒置。
-* **传统任务栏插件**：布局固定死板无法随心摆放，高分屏 DPI 缩放模糊，且**只能看总体数值，看不到究竟是哪个后台进程在偷跑资源**。
+### 卸载
 
-**GlanceBar** 诞生于对“克制、原生与极致优雅”的偏执追求：
-1. **纯粹原生**：摒弃沉重的 UI 框架，采用纯 Win32 API 与 GDI 双缓冲绘制，字体选用 Win11 原生 **Bahnschrift**，严丝合缝融进任务栏。
-2. **通透隐匿**：利用 ColorKey 色键抠像实现真正的穿透透明，无边框、无底色块，深浅色主题毫秒自适应。
-3. **悬停透视**：平时仅占任务栏一隅，鼠标滑过瞬间即可穿透直达占用资源的 **Top 5 进程排行榜，并提取该进程的原生高清图标**。
-4. **自由停靠**：任务栏任意位置随手拖动摆放，自动计算相对坐标并持久化记忆。
+在 Windows **设置 → 应用 → 已安装的应用** 中找到 **GlanceBar** 卸载，或运行安装目录下的 `unins000.exe`。
 
----
+- 卸载程序会自动停止并移除 `GlanceBarNetwork` 服务，清理 `%ProgramData%\GlanceBar` 与程序目录（可能被其他硬件监控工具共用的 `PawnIO` 驱动不会随之卸载）。
+- 如需在卸载前清除当前用户的注册表配置（停靠位置与开机自启项），可在普通用户终端中执行：
+  ```powershell
+  & "$env:ProgramFiles\GlanceBar\GlanceBar.exe" --clear-user-settings
+  ```
 
-## 🖥️ 视觉与交互全景
+## 数据口径说明
 
-### 1. 任务栏常驻态（极简、通透、不喧宾夺主）
+程序约每 **2 秒**采样并刷新一次，各项指标口径如下：
 
-在任务栏托盘或空白区以极其轻巧的微条常驻，与 Windows 11 原生视觉浑然一体（下图中的图标为示意）：
+- **总网速**：统计当前通往 `8.8.8.8` 的 IPv4 路由网卡流量（开启 VPN 时通常为隧道网卡）。采用十进制字节单位（`1 MB/s = 1,000,000 B/s`）。
+- **进程网络排行**：由后台服务通过内核 ETW 汇总全机 TCP/UDP 收发字节（包含本地回环与代理转发流量），因此各进程流量之和不等于单网卡总速率。
+- **CPU**：使用 `GetSystemTimes` 计算全机非空闲时间占比（未按睿频频率加权，数值可能与任务管理器的 `% Processor Utility` 不同）。温度优先读取 CPU 封装传感器，无对应传感器时取最高核心温度；硬件不支持或服务未运行时显示 `–°C`。
+- **GPU**：通过 PDH 计数器 `\GPU Engine(*)\Utilization Percentage` 汇总各物理引擎占用并取最繁忙引擎百分比；无有效数据时显示 `–`。
+- **内存**：总占用为系统已用物理内存占比；进程排行为各进程当前工作集大小。
 
-```text
- ┌─── Windows 11 任务栏 (Taskbar) ────────────────────────────────────────────────────────┐
- │ [⊞] [🔍] [Widgets] [Apps...]          ↓ 12.5M  ↑ 1.2M   ▣ 24  56°C   ◈ 18   ▥ 57    │
- └────────────────────────────────────────────────────────────────────────────────────────┘
-                                         下载速度  上传速度  CPU负载和温度  GPU负载 内存占比
-```
+## 从源码构建
 
-* **自适应色谱**：
-  * **下载速度**：定标清透海蓝（深色模式 `#7EC8F6` / 浅色模式 `#0067C0`）；
-  * **上传速度**：定标优雅淡紫（深色模式 `#C6A0E8` / 浅色模式 `#7748A8`）；
-  * **硬件状态**：跟随系统主题色（深浅色自适应前景色，灰度克制，不抢视觉主焦点）。
-* **像素级纯矢量图标**：CPU 使用带引脚的芯片，GPU 使用带风扇的显卡，内存使用带触点的 DIMM 条；图标与上下行箭头均由 GDI 绘制，并随 DPI 缩放。
+### 环境依赖
 
----
+- Windows 11 x64
+- [.NET 10 SDK](https://dotnet.microsoft.com/) (win-x64)
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)（包含命令行编译器 `ISCC.exe`）
 
-### 2. 鼠标悬停态（穿透明细浮窗）
+### 构建命令
 
-无需呼出任务管理器，鼠标滑过微条对应区域，即刻呼出毛玻璃质感进程透视卡片：
-
-```text
-┌── 悬停在【网速】区域 ──────────────────────┐  ┌── 悬停在【CPU】区域 ───────────────────────┐
-│ 网速 · Wi-Fi 6 (Intel Wi-Fi 6 AX200)      │  │ CPU  24%    温度  56°C                   │
-│ 下载 12.50 MB/s       上传 1.18 MB/s      │  │                                          │
-│ ────────────────────────────────────────  │  │ 占用 CPU 排行                            │
-│ 占用网速                                  │  │  🎨 Photoshop.exe                 14.2%  │
-│  🌐 msedge.exe       ↓ 11.20 MB/s  ↑ 40 KB│  │  ⚙️ svchost.exe                    4.1%  │
-│  🎮 Steam.exe        ↓  1.10 MB/s  ↑ 12 KB│  │  🌐 msedge.exe                     3.5%  │
-│  💬 WeChat.exe       ↓   80 KB/s   ↑ 1.1 MB│  │  🎵 Spotify.exe                    1.2%  │
-└───────────────────────────────────────────┘  └──────────────────────────────────────────┘
-
-┌── 悬停在【内存】区域 ──────────────────────┐  ┌── 悬停在【GPU】区域 ───────────────────────┐
-│ 内存  57%        18.24 GB / 32.00 GB      │  │ GPU 最繁忙引擎                           │
-│ ────────────────────────────────────────  │  │                                          │
-│ 占用内存排行                              │  │ 目前负载：18%                            │
-│  🎮 Cyberpunk2077.exe            6.42 GB  │  │ （实时聚合最繁忙 DirectX 图形引擎）      │
-│  🌐 msedge.exe                   1.85 GB  │  │                                          │
-│  💻 devenv.exe                   1.20 GB  │  │                                          │
-└───────────────────────────────────────────┘  └──────────────────────────────────────────┘
-```
-
-> [!TIP]
-> 浮窗中的进程图标不是通用占位图，而是通过 Windows Shell API 动态提取的各应用真实小图标，一眼即可分辨目标进程。
-
----
-
-### 3. 便捷交互速查
-
-| 交互操作 | 响应动作 | 设计细节与实现机制 |
-| :--- | :--- | :--- |
-| **鼠标悬停 (Hover)** | 毫秒级呼出对应指标透视窗 | 悬停网速、CPU、内存显示 Top 5 进程排行；悬停 GPU 显示图形引擎负载。 |
-| **按住左键拖拽 (Drag)** | 在任务栏任意位置自由滑动停靠 | 按下并位移 > 2px 即进入拖拽模式，松开时自动将归一化坐标存入注册表。 |
-| **左键单击 (Click)** | 极速呼出 Windows 任务管理器 | 单击未发生拖动时，瞬间以系统原生协议唤起 `taskmgr.exe`。 |
-| **右键单击 (Right Click)** | 打开快捷托盘菜单 | 提供 **“打开任务管理器”**、**“开机启动 (联动勾选)”** 与 **“退出程序”**。 |
-| **全屏应用 / 游戏 / PPT** | 智能无感隐匿 | 监听 `SHQueryUserNotificationState`，全屏游戏或演示时不抢视觉焦点。 |
-
----
-
-## ✨ 核心亮点
-
-```mermaid
-mindmap
-  root((GlanceBar))
-    视觉融合
-      Win32 Layered Window
-      ColorKey 透明抠像
-      深浅色模式自动感知
-      Bahnschrift 现代排版
-    透视监控
-      网速 ETW 实时流量
-      Top 5 进程网络排行
-      Top 5 CPU/内存开销
-      PDH 多 GPU 引擎聚合
-      Shell 原生图标缓存
-    克制轻量
-      纯 GDI 双缓冲绘制
-      零外部 GUI 框架依赖
-      极低 CPU / 内存占用
-      单文件 Self-Contained
-    交互体验
-      任务栏任意位置拖拽停靠
-      全屏游戏/放映智能避让
-      单击唤起任务管理器
-      DPI PerMonitorV2 缩放
-```
-
-- **🎨 真正的任务栏一体化沉浸**：  
-  利用双层窗口架构（Dual-layered Windows），以 `WS_EX_LAYERED` 与 `LWA_COLORKEY` 技术实现文字与矢量图标浮空于任务栏背景之上，无任何灰边或矩形背景框阻断视线。
-- **🔍 进程级资源精准溯源**：  
-  区别于大多数只展示总网速的插件，GlanceBar 借助 ETW（Event Tracing for Windows）技术聚合每个进程的收发字节，谁在后台消耗宽带一目了然。
-- **📐 完美的 PerMonitorV2 高清缩放**：  
-  精准响应高分屏与跨显示器 DPI 切换通知，矢量图标笔触与字体高度按比例平滑重算，4K 甚至 8K 屏幕下依然锐利细腻。
-- **🎮 游戏与演示智能隐匿**：  
-  工作时提供数据参考，娱乐时不打扰——检测到 Direct3D 全屏游戏独占或处于演示放映模式时自动隐藏，退出全屏后平滑恢复。
-
----
-
-## 📊 与传统工具对比
-
-| 评估维度 | 传统悬浮窗工具 (如 TrafficMonitor 等) | 任务栏挂件 (如某些三方管家插件) | 现代 Webview / Electron 挂件 | **GlanceBar** |
-| :--- | :--- | :--- | :--- | :--- |
-| **视觉呈现** | 独立浮窗，遮挡壁纸或窗口 | 需强行注入任务栏，易崩溃或错位 | 占用大，风格不原生 | **原生贴合任务栏，ColorKey 通透穿透** |
-| **资源占用** | 20MB ~ 60MB 内存 | 常绑定整套全家桶后台守护 | 150MB ~ 300MB+ 内存 | **羽量开销，纯 GDI，无重型 UI 框架** |
-| **进程透视** | 需额外打开右键二级菜单查看 | 通常仅支持 CPU 总体占比 | 进程网络消耗捕获开销巨大 | **鼠标一扫即现 Top 5 进程及原生图标** |
-| **高分屏支持** | 部分存在 DPI 模糊或文字偏移 | 缩放迟钝或断层 | 依赖浏览器缩放，资源开销倍增 | **原生 PerMonitorV2 像素级动态重绘** |
-| **自由停靠** | 停靠在桌面边缘，容易误碰 | 绝大多数位置写死在右侧托盘 | 固定在桌面特定网格 | **任务栏任意空白区域随手拖拽记忆** |
-| **游戏免扰** | 需手动设置全屏穿透或隐藏名单 | 无法感知全屏状态 | 偶发夺取全屏焦点导致游戏掉帧 | **系统级全屏/演示状态自动智能隐匿** |
-
----
-
-## 🛠️ 底层硬核技术揭秘
-
-GlanceBar 坚持使用纯正地道的 Windows 系统级桌面编程技术，各组件分工与数据流如下：
-
-```mermaid
-flowchart TD
-    subgraph KernelSpace ["Windows 内核层 (Kernel Space)"]
-        ETW["内核网络事件 (ETW Network Trace)"]
-        PDH["性能计数器 (PDH Engine)"]
-        SYS["系统时间与内存 (GetSystemTimes / MEMORYSTATUSEX)"]
-        CPU["CPU 温度传感器 (PawnIO)"]
-    end
-
-    subgraph ServiceSpace ["后台服务 (LocalSystem 权限)"]
-        SVC["GlanceBarNetwork (后台服务)\n• 订阅 ETW 网络事件\n• 采集 CPU 温度\n• 原子写入只读快照"]
-    end
-
-    subgraph UserSpace ["用户界面层 (普通用户权限)"]
-        TSV[("%ProgramData%\\GlanceBar\\network-processes.tsv")]
-        SAMPLER["MetricsSampler\n• 读取 TSV 快照\n• 轮询 CPU / GPU / RAM"]
-        SHELL["Shell_TrayWnd (Windows 任务栏)"]
-        
-        subgraph WindowDual ["双层窗口协同架构"]
-            RENDER["渲染层 (GlanceBar.Window)\n• LWA_COLORKEY 抠像透光\n• GDI 双缓冲像素级绘制"]
-            INPUT["输入层 (GlanceBar.Input)\n• LWA_ALPHA = 1 微透明\n• 捕获 MouseMove / Drag / Click"]
-            TOOLTIP["浮窗层 (GlanceBar.Tooltip)\n• Segoe UI Variable 排版\n• SHGetFileInfoW 图标缓存"]
-        end
-    end
-
-    ETW -->|TraceEvent 监听| SVC
-    CPU -->|LibreHardwareMonitor| SVC
-    SVC -->|每 2 秒原子刷写| TSV
-    TSV -->|只读打开| SAMPLER
-    PDH -->|GPU 负载| SAMPLER
-    SYS -->|CPU/内存| SAMPLER
-    SAMPLER -->|驱动重绘| RENDER
-    SHELL -.->|Parent 宿主| RENDER
-    SHELL -.->|Parent 宿主| INPUT
-    INPUT -->|触发位置联动与交互| RENDER
-    INPUT -->|悬停唤起| TOOLTIP
-```
-
-### 1. 双层窗口协同架构（Dual-layered Windows）
-* **渲染层 (`GlanceBar.Window`)**：采用 `WS_EX_LAYERED` 与 `LWA_COLORKEY` 技术。以当前任务栏底色作为透明关键色扣像，使数字与线条如同直接浮印在任务栏上。
-* **输入拦截层 (`GlanceBar.Input`)**：由于 Windows 底层机制中，ColorKey 完全透光的像素默认会将鼠标消息透传给下层的任务栏，导致点击穿透；GlanceBar 巧妙创建了一层尺寸重合、采用近乎不可见的极微 Alpha (`LWA_ALPHA = 1`) 的输入窗口，精准拦截 Hover、Drag 和 Click 消息。
-
-### 2. ETW 进程网络统计（权限解耦服务）
-* 获取进程级实时网络流量需要内核级 ETW 监听权限。为了保证日常使用安全，GlanceBar 进行了**权限分离设计**：
-  * **后台服务 (`GlanceBarNetwork`)**：以系统服务方式运行，通过 `Microsoft.Diagnostics.Tracing.TraceEvent` 汇总各 PID 的网络吞吐量，并通过 LibreHardwareMonitor 读取 CPU 温度；每 2 秒以原子替换方式向 `%ProgramData%\GlanceBar\network-processes.tsv` 写入只读快照。网络采样不记录或分析数据包载荷。
-  * **前端界面 (`GlanceBar.exe`)**：始终以普通用户权限运行，只读消费 TSV 快照并绘制界面，最大程度保障系统安全性。
-
-### 3. 多 GPU 引擎聚合（PDH）
-* 借助 Windows 性能数据帮助程序（PDH），通过 `\GPU Engine(*)\Utilization Percentage` 的持久通配符计数器采集负载。每次采样自动纳入新启动进程；按显卡与物理引擎汇总各进程占用，再取最繁忙引擎，不能将不同引擎或不同显卡的百分比直接相加。
-* 新出现的计数器需要建立采样基线；采集失败或没有有效数据时显示 `–`，不沿用上一次负载或伪装成 0%。
-
-### 4. 零抖动的 Shell 图标高速缓存
-* 在悬停展示进程详情时，利用 `QueryFullProcessImageNameW` 定位可执行文件路径，通过 `SHGetFileInfoW` 获取系统关联的 High-DPI 小图标并建立进程句柄级字典缓存，杜绝高频 GDI 句柄泄漏与硬盘 I/O 抖动。
-
-### 5. 统计口径与刷新间隔
-* **刷新**：任务栏约每 2 秒采样、重绘一次；CPU 和网速是采样区间平均值，不是瞬时峰值。与其他工具比较时，需要同时对齐统计口径和时间区间。
-* **CPU**：使用 `GetSystemTimes` 计算全机非空闲时间占比，不按 CPU 频率加权。Windows 的 `% Processor Utility` 则考虑处理器性能状态和睿频，两者可能明显不同，不能直接把差值当作采集错误。参见 [Microsoft 对时间占比与 Utility 的说明](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/cpu-usage-exceeds-100)。
-* **内存**：总量为系统已用物理内存；进程排行为工作集，包含共享页面，不能相加还原系统总量。
-* **总网速**：只统计 Windows 到 `8.8.8.8` 的当前 IPv4 路由网卡，悬停首行显示网卡名称；VPN 开启时可能是隧道网卡，而不是 WLAN。每次采样重新选择路由，切换网卡或读取失败后的第一次成功读取只建立基线，不产生虚高速度。
-* **进程网络排行**：来自全机 TCP/UDP ETW 事件，不限于上述网卡；代理、VPN 转发与本机通信也可能计入，应用与代理进程的流量可能分别出现，不能相加后与网卡总速率对账。服务约每 2 秒发布一次快照，与界面采样时间也不完全同步。
-* **单位**：网速使用十进制字节单位，`1 MB/s = 1,000,000 B/s`；不是宽带运营商常用的 `Mbps`，`1 MB/s = 8 Mbps`。
-
-
----
-
-## 🚀 快速开始
-
-### 系统与环境要求
-* **已验证支持系统**：Windows 11 x64（推荐使用最新稳定版）
-* **终端使用者**：无需额外安装运行库或驱动；安装包已包含所需组件。
-* **权限要求**：安装器需要一次性管理员权限，用于部署程序文件、采集服务和 CPU 温度所需的 PawnIO 内核驱动；日常运行界面仅需普通用户权限。
-
-### 下载与安装
-
-1. 前往 [GitHub Releases](https://github.com/forbidden-game/GlanceBar/releases/latest)，下载安装包 `GlanceBar-1.0.1-win-x64-Setup.exe` 及对应的 `.exe.sha256` 校验文件。
-2. （可选）在 PowerShell 中使用以下命令校验完整性：
-   ```powershell
-   Get-FileHash .\GlanceBar-1.0.1-win-x64-Setup.exe -Algorithm SHA256
-   ```
-3. 运行安装程序，按提示完成安装。
-   * 安装器会自动部署 PawnIO 驱动、将程序注册至 `%ProgramFiles%\GlanceBar` 并启动采集服务；如果已有较新版本的 PawnIO，则直接使用；
-   * 勾选“开机自启”可在当前用户登录时自动运行。
-4. 安装完成后，GlanceBar 将在任务栏呈现。按住鼠标左键即可拖动到你喜爱的位置。若驱动安装要求重启，请先重启电脑。
-
-CPU 温度优先显示封装或芯片温度；没有对应传感器时显示最高核心温度。硬件不支持、驱动不可用或服务未运行时显示 `–°C`，其他指标仍可使用。
-
-安装器目前未做代码签名，SmartScreen 可能显示“未知发布者”。请核对下载来源及 SHA256 校验值，并遵循组织安全策略；不要关闭 Defender。SHA256 仅验证文件完整性，不等同于发布者签名。
-
-普通交互安装会迁移当前用户旧版 `TaskbarPulse` 的位置设置、旧自启动和程序目录，并移除旧网络采样计划任务。静默安装或已提权启动安装器时，不会替其他账户配置 HKCU 自启动或启动界面；部署后请在实际使用者的普通用户会话中运行程序，或执行 `GlanceBar.exe --configure-user`。
-
----
-
-### 从源码编译构建
-
-如果你是开发者并希望自行编译定制，请准备：
-* **.NET 10 SDK** (win-x64)
-* **Inno Setup 6**（确保包含 `ISCC.exe`）
-
-在仓库根目录下打开 PowerShell 执行打包脚本：
+在仓库根目录下运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-Release.ps1
 ```
 
-构建脚本将自动完成：
-1. 下载并验证固定版本的官方 PawnIO 安装器；
-2. 编译发布 `.NET 10` 自包含单文件，并收集第三方许可及 PawnIO 源码；
-3. 调用 Inno Setup 编译器生成安装程序，在 `dist/` 输出安装器及 SHA256 校验文件。
+脚本会自动发布自包含单文件程序、校验并打包固定版本的官方 `PawnIO` 安装器及第三方开源许可声明，最终在 `dist/` 目录生成安装包与 `.sha256` 校验文件。
 
-GitHub Actions 可手动构建安装包；推送与项目版本一致的 `v*` 标签会构建并上传至草稿 Release，确认产物后再发布。目标电脑只需要安装器，不需要 `gh`、Git、SDK 或打包工具。
+### 架构简述
 
-### 1.0.1 安装修复
+- **前端界面 (`GlanceBar.exe`)**：普通用户权限运行。采用双层分层窗口（`LWA_COLORKEY` 透明渲染窗口 + `LWA_ALPHA=1` 鼠标输入窗口）挂载于系统任务栏，轮询系统性能计数器并只读读取网络与温度快照。
+- **后台服务 (`GlanceBar.exe --network-service`)**：以 `LocalSystem` 权限运行系统服务 `GlanceBarNetwork`，订阅内核 ETW 网络事件并调用 `LibreHardwareMonitor` 读取 CPU 温度，每 2 秒将结果原子更新至 `%ProgramData%\GlanceBar\network-processes.tsv`。
 
-* 云端构建读取编译器自报版本，不依赖 `ISCC.exe` 的 Windows 文件版本字段。
-* 安装器只设置共享目录自身权限，不递归改写预存文件的 ACL。旧快照和服务错误日志在启动服务前解除链接并重建，避免将 SYSTEM 写入重定向到目录外；个人位置设置保留。
+## 许可证
 
-### 1.0.2 采样准确性修复（未发布）
-
-* GPU 改用持久通配符计数器，修复新进程负载最多漏算约 30 秒的问题；接受 PDH 的两种有效数据状态，失败时显示不可用。
-* 网卡读取失败后清除流量基线，修复恢复时将多个区间的流量误除以单个区间而产生的速度尖峰。
-* 每次采样重新选择当前路由网卡，避免 VPN / Wi-Fi 切换后仍沿用旧网卡约 30 秒。
-* 悬停提示明确区分当前网卡总速率、全机进程流量、CPU 忙碌时间与 GPU 最繁忙引擎。
-
-
----
-
-## 🧹 卸载指南
-
-可在 Windows **设置 → 应用 → 已安装的应用 → GlanceBar → 卸载**，或运行安装目录下的 `unins000.exe`。
-
-卸载过程将自动停止并注销 `GlanceBarNetwork` 服务，清理共享快照数据与程序文件。PawnIO 可能被其他硬件监控软件共用，因此不会随 GlanceBar 一起卸载。
-
-> [!NOTE]
-> 若需在卸载前连同当前用户的注册表个性化记忆（如拖拽停靠坐标、自启开关）一并彻底清除，可以当前用户身份在终端中执行：
-> ```powershell
-> & "$env:ProgramFiles\GlanceBar\GlanceBar.exe" --clear-user-settings
-> ```
-
----
-
-## ❓ 常见问题 (FAQ)
-
-<details>
-<summary><b>Q1: 为什么安装时需要管理员权限？</b></summary>
-<br/>
-安装器需要管理员权限以注册网络采集服务和安装 PawnIO 驱动；前者用于按进程统计网络流量，后者用于读取 CPU 温度。日常使用时主界面以普通用户权限运行，无需提权。
-</details>
-
-<details>
-<summary><b>Q2: 为什么选择纯 Win32 GDI，而不是 WPF、WinUI 3 或 Web 技术？</b></summary>
-<br/>
-任务栏挂件的本质是“辅助观察者”，绝不能“反客为主”消耗宝贵的系统资源。现代 UI 框架动辄载入数十至数百兆运行时与渲染管线，而使用地道纯粹的 Win32 API 与 GDI 双缓冲技术，可以实现启动即秒开、空闲内存开销极低、且完美契合任务栏的 ColorKey 透明抠像。
-</details>
-
-<details>
-<summary><b>Q3: 拖动位置之后会丢失吗？</b></summary>
-<br/>
-不会。松开鼠标后，程序会将当前停靠位置折算为相对于任务栏宽度的归一化坐标并保存至注册表 `HKCU\Software\GlanceBar`。即使重启电脑、更改分辨率或插拔显示器，也能智能归位。
-</details>
-
-<details>
-<summary><b>Q4: 玩全屏游戏或者放映 PPT 时会遮挡吗？</b></summary>
-<br/>
-不会。程序内置调用 `SHQueryUserNotificationState` 监听系统通知状态。当检测到当前正处于 Direct3D 全屏独占（如全屏大型 3D 游戏）或演示模式（如 PowerPoint 幻灯片放映）时，微条会自动静默隐藏，不争抢视觉焦点。
-</details>
-
----
-
-## 📜 许可证与鸣谢
-
-* 本项目使用 [MIT License](LICENSE)，Copyright (c) 2026 eipi10。
-* 安装包附带 .NET 运行时、LibreHardwareMonitor、PawnIO 等依赖的第三方许可和 PawnIO 源码；各依赖按其各自许可证提供。
-
-<div align="center">
-
-**如果 GlanceBar 让你的任务栏更加清爽得力，欢迎点个 ⭐️ Star 支持一下！**
-
-</div>
+本项目基于 [MIT License](LICENSE) 开源。安装包内附带 `.NET Runtime`、`LibreHardwareMonitor`、`PawnIO` 等第三方依赖的许可证声明及 `PawnIO` 源码包。
