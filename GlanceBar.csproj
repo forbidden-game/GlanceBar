@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Version>1.0.3</Version>
+    <Version>1.1.0</Version>
     <Description>Transparent Windows taskbar resource monitor</Description>
     <Authors>eipi10</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -24,6 +24,9 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.26" />

@@ -64,6 +64,17 @@ internal static unsafe class Native
     internal const uint PDH_FMT_DOUBLE = 0x00000200;
     internal const uint PDH_FMT_NOCAP100 = 0x00008000;
 
+    internal const uint AF_INET = 2;
+    internal const uint AF_INET6 = 23;
+    internal const uint ERROR_INSUFFICIENT_BUFFER = 122;
+    internal const uint MIB_TCP_STATE_LISTEN = 2;
+    internal const uint MIB_TCP_STATE_ESTAB = 5;
+
+    internal enum TCP_TABLE_CLASS
+    {
+        TCP_TABLE_OWNER_PID_ALL = 5
+    }
+
     internal delegate nint WindowProc(nint hwnd, uint message, nuint wParam, nint lParam);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -239,6 +250,44 @@ internal static unsafe class Native
     {
         internal uint numEntries;
         internal MIB_IF_ROW2 first;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MIB_TCPROW_OWNER_PID
+    {
+        internal uint state;
+        internal uint localAddress;
+        internal uint localPort;
+        internal uint remoteAddress;
+        internal uint remotePort;
+        internal uint owningProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MIB_TCPTABLE_OWNER_PID
+    {
+        internal uint numEntries;
+        internal MIB_TCPROW_OWNER_PID first;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MIB_TCP6ROW_OWNER_PID
+    {
+        internal fixed byte localAddress[16];
+        internal uint localScopeId;
+        internal uint localPort;
+        internal fixed byte remoteAddress[16];
+        internal uint remoteScopeId;
+        internal uint remotePort;
+        internal uint state;
+        internal uint owningProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MIB_TCP6TABLE_OWNER_PID
+    {
+        internal uint numEntries;
+        internal MIB_TCP6ROW_OWNER_PID first;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -490,6 +539,11 @@ internal static unsafe class Native
     // Release the table allocated by GetIfTable2.
     [DllImport("iphlpapi.dll")]
     internal static extern void FreeMibTable(nint table);
+
+    // Read caller-owned IPv4 or IPv6 TCP tables with process ownership.
+    [DllImport("iphlpapi.dll")]
+    internal static extern uint GetExtendedTcpTable(nint tcpTable, ref uint size, [MarshalAs(UnmanagedType.Bool)] bool order,
+        uint addressFamily, TCP_TABLE_CLASS tableClass, uint reserved);
 
 
     [DllImport("pdh.dll", CharSet = CharSet.Unicode)]

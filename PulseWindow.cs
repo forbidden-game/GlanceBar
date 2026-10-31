@@ -647,7 +647,7 @@ internal sealed class PulseWindow : IDisposable
         _tooltip?.Update(BuildTooltipContent(_hoverSection), showImmediately);
     }
 
-    // Distinguish physical wire traffic from non-loopback process connections and their proxy attribution.
+    // Describe physical-interface totals separately from the preorder connection tree shown below them.
     private TooltipContent BuildTooltipContent(HoverSection section)
     {
         switch (section)
@@ -658,16 +658,16 @@ internal sealed class PulseWindow : IDisposable
                 {
                     $"网速 · {_metrics.NetworkInterfaceName}",
                     $"下载 {FormatDetailedRate(_metrics.DownloadBytesPerSecond)}    上传 {FormatDetailedRate(_metrics.UploadBytesPerSecond)}",
-                    "物理网卡合计；代理流量归属对外连接进程"
+                    "总量为物理网卡；树行代表连接各段，不相加"
                 };
                 if (!_metrics.NetworkDetailsAvailable)
                 {
-                    return new TooltipContent(topLines, "占用网速",
+                    return new TooltipContent(topLines, "连接进程树",
                         [new TooltipRow(0, "网络采样服务未运行，请重新运行安装程序修复")]);
                 }
                 if (_metrics.TopNetwork.Length == 0)
                 {
-                    return new TooltipContent(topLines, "占用网速",
+                    return new TooltipContent(topLines, "连接进程树",
                         [new TooltipRow(0, "暂无明显网络活动")]);
                 }
 
@@ -676,10 +676,11 @@ internal sealed class PulseWindow : IDisposable
                 {
                     var process = _metrics.TopNetwork[index];
                     rows[index] = new TooltipRow(
-                        process.ProcessId,
-                        $"{ShortName(process.Name)}    ↓ {FormatDetailedRate(process.DownloadBytesPerSecond)}    ↑ {FormatDetailedRate(process.UploadBytesPerSecond)}");
+                        process.Kind == NetworkTrafficKind.Summary ? 0 : process.ProcessId,
+                        FormatNetworkRow(process),
+                        process.Depth);
                 }
-                return new TooltipContent(topLines, "对外连接进程（不含本机回环）", rows);
+                return new TooltipContent(topLines, "连接进程树 · 前 5 组", rows);
             }
 
             case HoverSection.Cpu:
@@ -732,6 +733,30 @@ internal sealed class PulseWindow : IDisposable
             default:
                 return new TooltipContent([], null, []);
         }
+    }
+
+    // Label each tree row by traffic role without inventing rates for grouping or omission rows.
+    private static string FormatNetworkRow(NetworkProcessUsage process)
+    {
+        if (process.Kind == NetworkTrafficKind.Summary)
+        {
+            return process.Name;
+        }
+
+        var processLabel = process.ProcessId > 0
+            ? $"{ShortName(process.Name)} · PID {process.ProcessId}"
+            : ShortName(process.Name);
+        return process.Kind switch
+        {
+            NetworkTrafficKind.External =>
+                $"{processLabel}    对外 ↓ {FormatDetailedRate(process.DownloadBytesPerSecond)}    ↑ {FormatDetailedRate(process.UploadBytesPerSecond)}",
+            NetworkTrafficKind.Local when process.Depth > 0 =>
+                $"{processLabel}    本机连接 ↓ {FormatDetailedRate(process.DownloadBytesPerSecond)}    ↑ {FormatDetailedRate(process.UploadBytesPerSecond)}",
+            NetworkTrafficKind.Local =>
+                $"{processLabel}    本机流量（上游未确认） ↓ {FormatDetailedRate(process.DownloadBytesPerSecond)}    ↑ {FormatDetailedRate(process.UploadBytesPerSecond)}",
+            NetworkTrafficKind.Unknown => $"{processLabel}    本机连接服务（上游未确认）",
+            _ => $"{processLabel}    流量类型未知（未显示推测速率）"
+        };
     }
 
     private static string FormatDetailedRate(double bytesPerSecond)

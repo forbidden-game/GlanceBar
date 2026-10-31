@@ -1,20 +1,21 @@
-using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 
 namespace GlanceBar;
 
-internal readonly record struct NetworkProcessUsage(int ProcessId, string Name, double DownloadBytesPerSecond, double UploadBytesPerSecond);
 
 internal sealed class NetworkTraceSampler : IDisposable
 {
     private static readonly Guid ProviderId = new("7DD42A49-5329-4832-8DFD-43D979153A88");
     private const ulong NetworkKeywords = 0x30;
-    private const int TopCount = 5;
 
     private readonly object _sync = new();
-    private readonly Dictionary<int, Counters> _counters = new();
-    private readonly Dictionary<int, string> _processNames = new();
+    private readonly Dictionary<NetworkTrafficKey, Counters> _counters = new();
+    private readonly List<NetworkTrafficSample> _samples = new();
+    private readonly NetworkConnections _connectionReader = new();
+    private readonly NetworkTrafficTree _tree = new();
+    private NetworkConnectionSnapshot? _connections;
     private readonly TraceEventSession? _session;
     private readonly Thread? _thread;
     private volatile bool _disposed;
@@ -23,10 +24,12 @@ internal sealed class NetworkTraceSampler : IDisposable
     internal bool IsAvailable { get; }
     internal Exception? Failure => Volatile.Read(ref _failure);
 
+    // Bootstrap current socket ownership before listening, so existing proxy connections are classified immediately.
     internal NetworkTraceSampler()
     {
         try
         {
+            _connections = _connectionReader.Capture();
             const string sessionName = "GlanceBar.Network";
             _session = new TraceEventSession(sessionName) { StopOnDispose = true };
             _session.EnableProvider(ProviderId, TraceEventLevel.Informational, NetworkKeywords);
@@ -43,6 +46,7 @@ internal sealed class NetworkTraceSampler : IDisposable
         {
             _failure = exception;
             _session?.Dispose();
+            _connectionReader.Dispose();
             _session = null;
         }
     }
@@ -67,153 +71,71 @@ internal sealed class NetworkTraceSampler : IDisposable
         }
     }
 
-    // Decode the provider's v0 PID/size/address header and exclude local proxy/server transfers.
+    // Preserve app-side local proxy traffic separately from external traffic; suppress the server's mirrored copy.
     private unsafe void OnNetworkEvent(TraceEvent data)
     {
-        var direction = ((int)data.ID) switch
-        {
-            10 or 14 or 26 or 30 or 42 or 58 => 1,
-            11 or 27 or 43 or 59 => -1,
-            _ => 0
-        };
-        var ipv6 = (int)data.ID is 26 or 27 or 30 or 58 or 59;
-        var addressLength = ipv6 ? 16 : 4;
-        if (direction == 0 || data.Version != 0 || data.EventDataLength < 8 + addressLength * 2)
-        {
-            return;
-        }
-
-        // Addresses are stored in network byte order; spans avoid allocating IPv6 arrays per packet.
         var payload = new ReadOnlySpan<byte>((void*)data.DataStart, data.EventDataLength);
-        if (IsLoopback(payload.Slice(8, addressLength)) || IsLoopback(payload.Slice(8 + addressLength, addressLength)))
+        if (!NetworkPacket.TryRead((int)data.ID, data.Version, payload, out var packet) ||
+            packet.ProcessId == Environment.ProcessId)
         {
             return;
         }
-        var processId = BinaryPrimitives.ReadInt32LittleEndian(payload);
-        var bytes = BinaryPrimitives.ReadUInt32LittleEndian(payload[4..]);
-
-        if (processId <= 0 || bytes == 0 || processId == Environment.ProcessId)
+        var parentProcessId = 0;
+        if (packet.Local.Address.IsLoopback || packet.Remote.Address.IsLoopback)
         {
-            return;
+            var connections = Volatile.Read(ref _connections)!;
+            // Only TCP has both listening ownership and connected peer tuples in this topology snapshot.
+            if (packet.IsTcp)
+            {
+                if (connections.IsLocalServer(packet.ProcessId, packet.Local))
+                {
+                    return;
+                }
+                parentProcessId = connections.FindLocalServer(packet.ProcessId, packet.Local, packet.Remote);
+            }
+            if (parentProcessId == 0)
+            {
+                // Keep unclassified local activity visible rather than hiding an application or guessing a proxy.
+                parentProcessId = -1;
+            }
         }
-
         lock (_sync)
         {
-            if (!_counters.TryGetValue(processId, out var counters))
+            ref var counters = ref CollectionsMarshal.GetValueRefOrAddDefault(_counters,
+                new NetworkTrafficKey(packet.ProcessId, parentProcessId), out _);
+            if (packet.IsUpload)
             {
-                counters = new Counters();
-                _counters.Add(processId, counters);
-            }
-
-            if (direction > 0)
-            {
-                counters.Upload = unchecked(counters.Upload + bytes);
+                counters.Upload = unchecked(counters.Upload + packet.Bytes);
             }
             else
             {
-                counters.Download = unchecked(counters.Download + bytes);
+                counters.Download = unchecked(counters.Download + packet.Bytes);
             }
         }
     }
 
-    // Recognize 127/8, ::1 and IPv4-mapped loopback addresses without allocating IPAddress objects.
-    private static bool IsLoopback(ReadOnlySpan<byte> address)
-    {
-        if (address.Length == 4)
-        {
-            return address[0] == 127;
-        }
-        return BinaryPrimitives.ReadUInt64BigEndian(address) == 0 &&
-            (BinaryPrimitives.ReadUInt64BigEndian(address[8..]) == 1 ||
-             (BinaryPrimitives.ReadUInt32BigEndian(address[8..]) == 0x0000FFFF && address[12] == 127));
-    }
-
+    // Capture current topology and transfer one counter interval into a bounded, parent-first process forest.
     internal NetworkProcessUsage[] TakeTop(double elapsedSeconds)
     {
         if (!IsAvailable || elapsedSeconds <= 0)
         {
             return [];
         }
-
-        Span<int> ids = stackalloc int[TopCount];
-        Span<ulong> downloads = stackalloc ulong[TopCount];
-        Span<ulong> uploads = stackalloc ulong[TopCount];
-        Span<ulong> totals = stackalloc ulong[TopCount];
-        var count = 0;
-
+        var connections = _connectionReader.Capture();
+        Volatile.Write(ref _connections, connections);
+        _samples.Clear();
         lock (_sync)
         {
             foreach (var pair in _counters)
             {
-                var total = pair.Value.Download + pair.Value.Upload;
-                if (total == 0)
-                {
-                    continue;
-                }
-
-                var insertAt = count;
-                while (insertAt > 0 && totals[insertAt - 1] < total)
-                {
-                    insertAt--;
-                }
-                if (insertAt >= TopCount)
-                {
-                    pair.Value.Reset();
-                    continue;
-                }
-
-                var upper = Math.Min(count, TopCount - 1);
-                for (var index = upper; index > insertAt; index--)
-                {
-                    ids[index] = ids[index - 1];
-                    downloads[index] = downloads[index - 1];
-                    uploads[index] = uploads[index - 1];
-                    totals[index] = totals[index - 1];
-                }
-                ids[insertAt] = pair.Key;
-                downloads[insertAt] = pair.Value.Download;
-                uploads[insertAt] = pair.Value.Upload;
-                totals[insertAt] = total;
-                if (count < TopCount)
-                {
-                    count++;
-                }
-                pair.Value.Reset();
+                _samples.Add(new NetworkTrafficSample(pair.Key, pair.Value.Download, pair.Value.Upload));
             }
+            _counters.Clear();
         }
-
-        var result = new NetworkProcessUsage[count];
-        for (var index = 0; index < count; index++)
-        {
-            result[index] = new NetworkProcessUsage(
-                ids[index],
-                ResolveProcessName(ids[index]),
-                downloads[index] / elapsedSeconds,
-                uploads[index] / elapsedSeconds);
-        }
-        return result;
+        return _tree.Build(_samples, connections, elapsedSeconds);
     }
 
-    private string ResolveProcessName(int processId)
-    {
-        if (_processNames.TryGetValue(processId, out var name))
-        {
-            return name;
-        }
-
-        try
-        {
-            using var process = System.Diagnostics.Process.GetProcessById(processId);
-            name = process.ProcessName;
-        }
-        catch
-        {
-            name = $"PID {processId}";
-        }
-        _processNames[processId] = name;
-        return name;
-    }
-
+    // Stop event delivery before releasing the reusable native socket-table buffers.
     public void Dispose()
     {
         if (_disposed)
@@ -226,17 +148,12 @@ internal sealed class NetworkTraceSampler : IDisposable
         {
             _thread.Join(1000);
         }
+        _connectionReader.Dispose();
     }
 
-    private sealed class Counters
+    private struct Counters
     {
         internal ulong Download;
         internal ulong Upload;
-
-        internal void Reset()
-        {
-            Download = 0;
-            Upload = 0;
-        }
     }
 }

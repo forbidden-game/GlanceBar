@@ -4,7 +4,7 @@ using System.Text;
 
 namespace GlanceBar;
 
-internal readonly record struct TooltipRow(int ProcessId, string Text);
+internal readonly record struct TooltipRow(int ProcessId, string Text, int Depth = 0);
 
 internal sealed class TooltipContent(string[] topLines, string? sectionTitle, TooltipRow[] rows)
 {
@@ -86,6 +86,7 @@ internal sealed class HoverTooltip : IDisposable
         }
     }
 
+    // Measure tree indentation together with each row's icon and text so the popup never clips nested content.
     private void LayoutAndShow()
     {
         if (_content is null || !Native.GetCursorPos(out var cursor))
@@ -97,6 +98,7 @@ internal sealed class HoverTooltip : IDisposable
         var paddingY = Scale(9);
         var iconSize = Scale(16);
         var iconGap = Scale(7);
+        var treeIndent = Scale(18);
         var sectionGap = Scale(7);
         var dc = Native.GetDC(_window);
         var oldFont = Native.SelectObject(dc, _font);
@@ -114,8 +116,9 @@ internal sealed class HoverTooltip : IDisposable
         }
         foreach (var row in _content.Rows)
         {
+            var contentOffset = Math.Max(0, row.Depth) * treeIndent;
             var iconWidth = row.ProcessId > 0 ? iconSize + iconGap : 0;
-            contentWidth = Math.Max(contentWidth, iconWidth + Measure(dc, row.Text));
+            contentWidth = Math.Max(contentWidth, contentOffset + iconWidth + Measure(dc, row.Text));
         }
         Native.SelectObject(dc, oldFont);
         Native.ReleaseDC(_window, dc);
@@ -193,6 +196,7 @@ internal sealed class HoverTooltip : IDisposable
         }
     }
 
+    // Paint each preorder row at its tree depth and draw real connector strokes without changing flat tooltips.
     private void Paint(nint hwnd)
     {
         var dc = Native.BeginPaint(hwnd, out var paint);
@@ -224,6 +228,8 @@ internal sealed class HoverTooltip : IDisposable
             var lineHeight = metrics.height + Scale(2);
             var iconSize = Scale(16);
             var iconGap = Scale(7);
+            var treeIndent = Scale(18);
+            var branchThickness = Math.Max(1, Scale(1));
             var rowHeight = Math.Max(lineHeight, iconSize) + Scale(3);
             var y = paddingY;
 
@@ -243,15 +249,44 @@ internal sealed class HoverTooltip : IDisposable
             }
 
             Native.SetTextColor(dc, foreground);
-            foreach (var row in _content.Rows)
+            nint branchBrush = 0;
+            for (var rowIndex = 0; rowIndex < _content.Rows.Length; rowIndex++)
             {
-                var textX = paddingX;
+                var row = _content.Rows[rowIndex];
+                var depth = Math.Max(0, row.Depth);
+                var contentX = paddingX + depth * treeIndent;
+                var rowMiddle = y + rowHeight / 2;
+                if (depth > 0)
+                {
+                    if (branchBrush == 0)
+                    {
+                        branchBrush = Native.CreateSolidBrush(muted);
+                    }
+                    for (var level = 1; level < depth; level++)
+                    {
+                        if (HasFollowingSibling(_content.Rows, rowIndex, level))
+                        {
+                            var ancestorX = paddingX + (level - 1) * treeIndent + treeIndent / 2;
+                            FillLine(dc, branchBrush, ancestorX, y, branchThickness, rowHeight);
+                        }
+                    }
+
+                    var branchX = paddingX + (depth - 1) * treeIndent + treeIndent / 2;
+                    var verticalHeight = HasFollowingSibling(_content.Rows, rowIndex, depth)
+                        ? rowHeight
+                        : rowHeight / 2 + branchThickness;
+                    FillLine(dc, branchBrush, branchX, y, branchThickness, verticalHeight);
+                    FillLine(dc, branchBrush, branchX, rowMiddle,
+                        Math.Max(branchThickness, contentX - Scale(3) - branchX), branchThickness);
+                }
+
+                var textX = contentX;
                 if (row.ProcessId > 0)
                 {
                     var icon = GetProcessIcon(row.ProcessId);
                     if (icon != 0)
                     {
-                        Native.DrawIconEx(dc, paddingX, y + (rowHeight - iconSize) / 2, icon,
+                        Native.DrawIconEx(dc, contentX, y + (rowHeight - iconSize) / 2, icon,
                             iconSize, iconSize, 0, 0, Native.DI_NORMAL);
                     }
                     textX += iconSize + iconGap;
@@ -260,12 +295,47 @@ internal sealed class HoverTooltip : IDisposable
                 Native.TextOutString(dc, textX, textY, row.Text, row.Text.Length);
                 y += rowHeight;
             }
+            if (branchBrush != 0)
+            {
+                Native.DeleteObject(branchBrush);
+            }
             Native.SelectObject(dc, oldFont);
         }
         finally
         {
             Native.EndPaint(hwnd, ref paint);
         }
+    }
+
+    // Determine whether the active branch at a depth continues to a later sibling in preorder.
+    private static bool HasFollowingSibling(TooltipRow[] rows, int rowIndex, int depth)
+    {
+        for (var index = rowIndex + 1; index < rows.Length; index++)
+        {
+            var candidateDepth = Math.Max(0, rows[index].Depth);
+            if (candidateDepth < depth)
+            {
+                return false;
+            }
+            if (candidateDepth == depth)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Fill a DPI-sized connector segment using the shared branch brush.
+    private static void FillLine(nint dc, nint brush, int x, int y, int width, int height)
+    {
+        var rectangle = new Native.RECT
+        {
+            Left = x,
+            Top = y,
+            Right = x + width,
+            Bottom = y + height
+        };
+        Native.FillRect(dc, ref rectangle, brush);
     }
 
     private nint GetProcessIcon(int processId)
