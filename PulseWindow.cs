@@ -10,10 +10,11 @@ internal sealed class PulseWindow : IDisposable
     private const string ClassName = "GlanceBar.Window";
     private const string InputClassName = "GlanceBar.Input";
     private const nuint TimerId = 1;
-    // Leave room for the hardware glyphs and full-width metric readings at 100% DPI.
-    private const int LogicalWidth = 257;
-    private const int NetworkIconWidth = 9;
-    private const int HardwareIconWidth = 12;
+    // Leave room for compact hardware labels and full-width metric readings at 100% DPI.
+    private const int LogicalWidth = 284;
+    private const string CpuLabel = "CPU";
+    private const string GpuLabel = "GPU";
+    private const string MemoryLabel = "RAM";
     private const int CommandTaskManager = 1;
     private const int CommandStartup = 2;
     private const int CommandExit = 3;
@@ -50,6 +51,7 @@ internal sealed class PulseWindow : IDisposable
     private nint _inputWindow;
     private nint _taskbar;
     private nint _font;
+    private nint _labelFont;
     private uint _dpi = 96;
     private uint _taskbarCreatedMessage;
     private int _ticks;
@@ -645,7 +647,7 @@ internal sealed class PulseWindow : IDisposable
         _tooltip?.Update(BuildTooltipContent(_hoverSection), showImmediately);
     }
 
-    // State each metric's scope so interface totals and whole-machine process traffic are not conflated.
+    // Distinguish physical wire traffic from non-loopback process connections and their proxy attribution.
     private TooltipContent BuildTooltipContent(HoverSection section)
     {
         switch (section)
@@ -656,7 +658,7 @@ internal sealed class PulseWindow : IDisposable
                 {
                     $"网速 · {_metrics.NetworkInterfaceName}",
                     $"下载 {FormatDetailedRate(_metrics.DownloadBytesPerSecond)}    上传 {FormatDetailedRate(_metrics.UploadBytesPerSecond)}",
-                    "总速率仅当前网卡；进程流量为全机统计"
+                    "物理网卡合计；代理流量归属对外连接进程"
                 };
                 if (!_metrics.NetworkDetailsAvailable)
                 {
@@ -677,7 +679,7 @@ internal sealed class PulseWindow : IDisposable
                         process.ProcessId,
                         $"{ShortName(process.Name)}    ↓ {FormatDetailedRate(process.DownloadBytesPerSecond)}    ↑ {FormatDetailedRate(process.UploadBytesPerSecond)}");
                 }
-                return new TooltipContent(topLines, "全机进程流量（含代理转发）", rows);
+                return new TooltipContent(topLines, "对外连接进程（不含本机回环）", rows);
             }
 
             case HoverSection.Cpu:
@@ -784,10 +786,20 @@ internal sealed class PulseWindow : IDisposable
         {
             Native.DeleteObject(_font);
         }
+        if (_labelFont != 0)
+        {
+            Native.DeleteObject(_labelFont);
+        }
 
         var height = -Native.MulDiv(8, (int)dpi, 72);
         _font = Native.CreateFontW(
             height, 0, 0, 0, Native.FW_SEMIBOLD,
+            0, 0, 0, 1, 0, 0, 4, 0,
+            "Bahnschrift");
+
+        var labelHeight = -Native.MulDiv(17, (int)dpi, 180);
+        _labelFont = Native.CreateFontW(
+            labelHeight, 0, 0, 0, Native.FW_SEMIBOLD,
             0, 0, 0, 1, 0, 0, 4, 0,
             "Bahnschrift");
     }
@@ -819,7 +831,7 @@ internal sealed class PulseWindow : IDisposable
                     : Native.Color(235, 235, 237);
                 var mutedColor = _lightTheme
                     ? Native.Color(102, 102, 107)
-                    : Native.Color(174, 174, 181);
+                    : Native.Color(162, 166, 176);
                 var downloadColor = _lightTheme
                     ? Native.Color(0, 103, 192)
                     : Native.Color(126, 200, 246);
@@ -827,39 +839,47 @@ internal sealed class PulseWindow : IDisposable
                     ? Native.Color(119, 72, 168)
                     : Native.Color(198, 160, 232);
 
-                var oldFont = Native.SelectObject(memoryDc, _font);
+                var oldFont = Native.SelectObject(memoryDc, _labelFont);
                 Native.SetBkMode(memoryDc, Native.TRANSPARENT);
+                Native.GetTextMetricsW(memoryDc, out var labelMetrics);
+                var cpuLabelWidth = Measure(memoryDc, CpuLabel);
+                var gpuLabelWidth = Measure(memoryDc, GpuLabel);
+                var memoryLabelWidth = Measure(memoryDc, MemoryLabel);
+
+                Native.SelectObject(memoryDc, _font);
                 Native.GetTextMetricsW(memoryDc, out var textMetrics);
 
-                var networkIconWidth = Scale(NetworkIconWidth);
-                var hardwareIconWidth = Scale(HardwareIconWidth);
+                var arrowWidth = GetArrowWidth();
                 var tinyGap = Scale(2);
-                var sectionGap = Scale(5);
+                var sectionGap = Scale(6);
                 var totalWidth =
-                    networkIconWidth + tinyGap + Measure(memoryDc, _downloadText) + sectionGap +
-                    networkIconWidth + tinyGap + Measure(memoryDc, _uploadText) + sectionGap +
-                    hardwareIconWidth + tinyGap + Measure(memoryDc, _cpuText) + sectionGap +
-                    Measure(memoryDc, _cpuTemperatureText) +
-                    hardwareIconWidth + tinyGap + Measure(memoryDc, _gpuText) + sectionGap +
-                    hardwareIconWidth + tinyGap + Measure(memoryDc, _memoryText);
+                    arrowWidth + tinyGap + Measure(memoryDc, _downloadText) + sectionGap +
+                    arrowWidth + tinyGap + Measure(memoryDc, _uploadText) + sectionGap +
+                    cpuLabelWidth + tinyGap + Measure(memoryDc, _cpuText) +
+                    Measure(memoryDc, _cpuTemperatureText) + sectionGap +
+                    gpuLabelWidth + tinyGap + Measure(memoryDc, _gpuText) + sectionGap +
+                    memoryLabelWidth + tinyGap + Measure(memoryDc, _memoryText);
 
                 var x = Math.Max(Scale(5), (client.Width - totalWidth) / 2);
                 var y = Math.Max(0, (client.Height - textMetrics.height) / 2);
+                var labelY = y + textMetrics.ascent - labelMetrics.ascent;
+                var arrowTop = y + textMetrics.internalLeading + 1;
+                var arrowHeight = Math.Max(Scale(6), textMetrics.ascent - textMetrics.internalLeading - 1);
                 _contentStart = x;
 
-                x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Download, downloadColor) + tinyGap;
+                x = DrawArrow(memoryDc, x, arrowTop, arrowHeight, down: true, downloadColor) + tinyGap;
                 x = Draw(memoryDc, x, y, _downloadText, textColor) + sectionGap;
-                x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Upload, uploadColor) + tinyGap;
+                x = DrawArrow(memoryDc, x, arrowTop, arrowHeight, down: false, uploadColor) + tinyGap;
                 x = Draw(memoryDc, x, y, _uploadText, textColor) + sectionGap;
                 _networkEnd = x - sectionGap / 2;
-                x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Cpu, mutedColor) + tinyGap;
+                x = DrawLabel(memoryDc, x, labelY, CpuLabel, mutedColor) + tinyGap;
                 x = Draw(memoryDc, x, y, _cpuText, textColor);
                 x = Draw(memoryDc, x, y, _cpuTemperatureText, textColor) + sectionGap;
                 _cpuEnd = x - sectionGap / 2;
-                x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Gpu, mutedColor) + tinyGap;
+                x = DrawLabel(memoryDc, x, labelY, GpuLabel, mutedColor) + tinyGap;
                 x = Draw(memoryDc, x, y, _gpuText, textColor) + sectionGap;
                 _gpuEnd = x - sectionGap / 2;
-                x = DrawStatusIcon(memoryDc, x, y, textMetrics.height, StatusIcon.Memory, mutedColor) + tinyGap;
+                x = DrawLabel(memoryDc, x, labelY, MemoryLabel, mutedColor) + tinyGap;
                 _contentEnd = Draw(memoryDc, x, y, _memoryText, textColor);
 
                 Native.SelectObject(memoryDc, oldFont);
@@ -878,97 +898,58 @@ internal sealed class PulseWindow : IDisposable
         }
     }
 
-    // Draw compact, DPI-scaled status glyphs and return the start of the following gap.
-    private int DrawStatusIcon(nint hdc, int x, int y, int textHeight, StatusIcon icon, uint color)
+    private int GetArrowWidth()
     {
-        var hardware = icon is StatusIcon.Cpu or StatusIcon.Gpu or StatusIcon.Memory;
-        // Scale grid coordinates independently so fractional DPI keeps the geometry aligned.
-        Span<int> unit = stackalloc int[HardwareIconWidth];
-        if (hardware)
+        var stem = Math.Max(1, ((int)_dpi + 48) / 96);
+        var wing = Math.Max(2, (3 * (int)_dpi + 48) / 96);
+        return wing * 2 + stem;
+    }
+
+    // Draw a symmetric chevron arrow using filled pixel blocks so diagonal wings never drop endpoint pixels.
+    private int DrawArrow(nint hdc, int x, int top, int height, bool down, uint color)
+    {
+        var brush = Native.CreateSolidBrush(color);
+        try
         {
-            for (var coordinate = 1; coordinate < unit.Length; coordinate++)
+            var stem = Math.Max(1, ((int)_dpi + 48) / 96);
+            var wing = Math.Max(2, (3 * (int)_dpi + 48) / 96);
+            var stemLeft = x + wing;
+            var stemRight = stemLeft + stem;
+            FillBox(hdc, brush, stemLeft, top, stemRight, top + height);
+            for (var step = 1; step <= wing; step++)
             {
-                unit[coordinate] = Scale(coordinate);
+                var wingY = down ? top + height - stem - step : top + step;
+                FillBox(hdc, brush, stemLeft - step, wingY, stemLeft - step + stem, wingY + stem);
+                FillBox(hdc, brush, stemRight + step - stem, wingY, stemRight + step, wingY + stem);
             }
+            return x + wing * 2 + stem;
         }
-        var one = hardware ? unit[1] : Scale(1);
-        var size = hardware ? unit[HardwareIconWidth - 1] : Scale(NetworkIconWidth - 1);
-        var left = x;
-        var top = y + Math.Max(0, (textHeight - size) / 2);
-        var right = left + size;
-        var bottom = top + size;
-        var centerX = (left + right) / 2;
-        var centerY = (top + bottom) / 2;
-        var pen = Native.CreatePen(Native.PS_SOLID, Math.Max(1, one), color);
-        var oldPen = Native.SelectObject(hdc, pen);
-
-        switch (icon)
+        finally
         {
-            case StatusIcon.Download:
-                DrawLine(hdc, centerX, top, centerX, bottom - one);
-                DrawLine(hdc, centerX, bottom - one, left + one, centerY);
-                DrawLine(hdc, centerX, bottom - one, right - one, centerY);
-                break;
-            case StatusIcon.Upload:
-                DrawLine(hdc, centerX, bottom, centerX, top + one);
-                DrawLine(hdc, centerX, top + one, left + one, centerY);
-                DrawLine(hdc, centerX, top + one, right - one, centerY);
-                break;
-            case StatusIcon.Cpu:
-                // A square package, central die, and two pins on each side.
-                DrawBox(hdc, left + unit[2], top + unit[2], left + unit[8], top + unit[8]);
-                DrawBox(hdc, left + unit[4], top + unit[4], left + unit[6], top + unit[6]);
-                for (var pin = 4; pin <= 6; pin += 2)
-                {
-                    var offset = unit[pin];
-                    DrawLine(hdc, left + offset, top, left + offset, top + unit[2]);
-                    DrawLine(hdc, left + offset, top + unit[8], left + offset, top + unit[11]);
-                    DrawLine(hdc, left, top + offset, left + unit[2], top + offset);
-                    DrawLine(hdc, left + unit[8], top + offset, left + unit[11], top + offset);
-                }
-                break;
-            case StatusIcon.Gpu:
-                // The bracket and edge contacts distinguish the card from a monitor.
-                DrawLine(hdc, left, top + unit[1], left, top + unit[10]);
-                DrawBox(hdc, left + unit[1], top + unit[2], left + unit[10], top + unit[8]);
-                DrawLine(hdc, left + unit[6], top + unit[3], left + unit[8], top + unit[5]);
-                DrawLine(hdc, left + unit[8], top + unit[5], left + unit[6], top + unit[7]);
-                DrawLine(hdc, left + unit[6], top + unit[7], left + unit[4], top + unit[5]);
-                DrawLine(hdc, left + unit[4], top + unit[5], left + unit[6], top + unit[3]);
-                DrawLine(hdc, left + unit[4], top + unit[8], left + unit[4], top + unit[11]);
-                DrawLine(hdc, left + unit[7], top + unit[8], left + unit[7], top + unit[11]);
-                break;
-            case StatusIcon.Memory:
-                // Three memory chips sit above the contacts of a DIMM.
-                DrawBox(hdc, left, top + unit[2], left + unit[10], top + unit[7]);
-                for (var chip = 2; chip <= 8; chip += 3)
-                {
-                    DrawLine(hdc, left + unit[chip], top + unit[4], left + unit[chip], top + unit[6]);
-                }
-                for (var pin = 2; pin <= 8; pin += 2)
-                {
-                    DrawLine(hdc, left + unit[pin], top + unit[7], left + unit[pin], top + unit[10]);
-                }
-                break;
+            Native.DeleteObject(brush);
         }
-
-        Native.SelectObject(hdc, oldPen);
-        Native.DeleteObject(pen);
-        return x + Scale(hardware ? HardwareIconWidth : NetworkIconWidth);
     }
 
-    private static void DrawLine(nint hdc, int x1, int y1, int x2, int y2)
+    private static void FillBox(nint hdc, nint brush, int left, int top, int right, int bottom)
     {
-        Native.MoveToEx(hdc, x1, y1, 0);
-        Native.LineTo(hdc, x2, y2);
+        var rectangle = new Native.RECT
+        {
+            Left = left,
+            Top = top,
+            Right = right,
+            Bottom = bottom
+        };
+        Native.FillRect(hdc, ref rectangle, brush);
     }
 
-    private static void DrawBox(nint hdc, int left, int top, int right, int bottom)
+    private int DrawLabel(nint hdc, int x, int y, string text, uint color)
     {
-        DrawLine(hdc, left, top, right, top);
-        DrawLine(hdc, right, top, right, bottom);
-        DrawLine(hdc, right, bottom, left, bottom);
-        DrawLine(hdc, left, bottom, left, top);
+        Native.SelectObject(hdc, _labelFont);
+        Native.SetTextColor(hdc, color);
+        Native.TextOutString(hdc, x, y, text, text.Length);
+        var width = Measure(hdc, text);
+        Native.SelectObject(hdc, _font);
+        return x + width;
     }
 
     private static int Measure(nint hdc, string text)
@@ -1072,6 +1053,11 @@ internal sealed class PulseWindow : IDisposable
             Native.DeleteObject(_font);
             _font = 0;
         }
+        if (_labelFont != 0)
+        {
+            Native.DeleteObject(_labelFont);
+            _labelFont = 0;
+        }
         _metrics.Dispose();
         _instance = null;
     }
@@ -1081,15 +1067,6 @@ internal enum HoverSection
 {
     None,
     Network,
-    Cpu,
-    Gpu,
-    Memory
-}
-
-internal enum StatusIcon
-{
-    Download,
-    Upload,
     Cpu,
     Gpu,
     Memory

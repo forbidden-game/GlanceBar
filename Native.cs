@@ -46,7 +46,6 @@ internal static unsafe class Native
     internal const uint DT_NOPREFIX = 0x00000800;
     internal const uint DT_CALCRECT = 0x00000400;
     internal const int HTTRANSPARENT = -1;
-    internal const int PS_SOLID = 0;
     internal const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     internal const uint SHGFI_ICON = 0x00000100;
     internal const uint SHGFI_SMALLICON = 0x00000001;
@@ -186,6 +185,60 @@ internal static unsafe class Native
         internal ulong totalVirtual;
         internal ulong availableVirtual;
         internal ulong availableExtendedVirtual;
+    }
+
+    // Keep the complete native row layout, including fixed buffers and 64-bit alignment.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MIB_IF_ROW2
+    {
+        internal ulong interfaceLuid;
+        internal uint interfaceIndex;
+        internal Guid interfaceGuid;
+        internal fixed char alias[257];
+        internal fixed char description[257];
+        internal uint physicalAddressLength;
+        internal fixed byte physicalAddress[32];
+        internal fixed byte permanentPhysicalAddress[32];
+        internal uint mtu;
+        internal uint type;
+        internal uint tunnelType;
+        internal uint mediaType;
+        internal uint physicalMediumType;
+        internal uint accessType;
+        internal uint directionType;
+        internal byte interfaceAndOperStatusFlags;
+        internal uint operStatus;
+        internal uint adminStatus;
+        internal uint mediaConnectState;
+        internal Guid networkGuid;
+        internal uint connectionType;
+        internal ulong transmitLinkSpeed;
+        internal ulong receiveLinkSpeed;
+        internal ulong inOctets;
+        internal ulong inUcastPkts;
+        internal ulong inNUcastPkts;
+        internal ulong inDiscards;
+        internal ulong inErrors;
+        internal ulong inUnknownProtos;
+        internal ulong inUcastOctets;
+        internal ulong inMulticastOctets;
+        internal ulong inBroadcastOctets;
+        internal ulong outOctets;
+        internal ulong outUcastPkts;
+        internal ulong outNUcastPkts;
+        internal ulong outDiscards;
+        internal ulong outErrors;
+        internal ulong outUcastOctets;
+        internal ulong outMulticastOctets;
+        internal ulong outBroadcastOctets;
+        internal ulong outQLen;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MIB_IF_TABLE2
+    {
+        internal uint numEntries;
+        internal MIB_IF_ROW2 first;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -401,18 +454,6 @@ internal static unsafe class Native
     internal static extern bool TextOutBuffer(nint hdc, int x, int y, StringBuilder text, int length);
 
     [DllImport("gdi32.dll")]
-    internal static extern nint CreatePen(int style, int width, uint color);
-
-    [DllImport("gdi32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool MoveToEx(nint hdc, int x, int y, nint previousPoint);
-
-    [DllImport("gdi32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool LineTo(nint hdc, int x, int y);
-
-
-    [DllImport("gdi32.dll")]
     internal static extern nint CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
 
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetTextExtentPoint32W")]
@@ -442,8 +483,13 @@ internal static unsafe class Native
     [DllImport("kernel32.dll")]
     internal static extern int MulDiv(int number, int numerator, int denominator);
 
+    // Enumerate physical and logical interfaces with hardware flags and 64-bit byte counters.
     [DllImport("iphlpapi.dll")]
-    internal static extern uint GetBestInterface(uint destinationAddress, out uint bestInterfaceIndex);
+    internal static extern uint GetIfTable2(out nint table);
+
+    // Release the table allocated by GetIfTable2.
+    [DllImport("iphlpapi.dll")]
+    internal static extern void FreeMibTable(nint table);
 
 
     [DllImport("pdh.dll", CharSet = CharSet.Unicode)]

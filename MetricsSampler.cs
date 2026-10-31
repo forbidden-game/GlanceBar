@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.NetworkInformation;
 
 namespace GlanceBar;
 
@@ -7,15 +6,11 @@ internal sealed class MetricsSampler : IDisposable
 {
     private readonly GpuSampler _gpu = new();
     private readonly ProcessDetailsSampler _details = new();
-    private NetworkInterface? _activeInterface;
-    private string _activeInterfaceId = string.Empty;
+    private readonly NetworkSampler _network = new();
     private ulong _previousIdle;
     private ulong _previousKernel;
     private ulong _previousUser;
-    private long _previousBytesIn;
-    private long _previousBytesOut;
     private long _previousTimestamp;
-    private bool _hasNetworkBaseline;
     private bool _disposed;
 
     internal double CpuPercent { get; private set; }
@@ -24,23 +19,24 @@ internal sealed class MetricsSampler : IDisposable
     internal uint MemoryPercent { get; private set; }
     internal ulong TotalMemoryBytes { get; private set; }
     internal ulong UsedMemoryBytes { get; private set; }
-    internal double DownloadBytesPerSecond { get; private set; }
-    internal double UploadBytesPerSecond { get; private set; }
-    internal string NetworkInterfaceName => _activeInterface?.Name ?? "无可用网络";
+    internal double DownloadBytesPerSecond => _network.DownloadBytesPerSecond;
+    internal double UploadBytesPerSecond => _network.UploadBytesPerSecond;
+    internal string NetworkInterfaceName => _network.InterfaceNames;
     internal CpuProcessUsage[] TopCpu => _details.TopCpu;
     internal MemoryProcessUsage[] TopMemory => _details.TopMemory;
     internal NetworkProcessUsage[] TopNetwork => _details.TopNetwork;
     internal bool NetworkDetailsAvailable => _details.NetworkDetailsAvailable;
 
+    // Establish CPU and physical-interface baselines before calculating interval readings.
     internal MetricsSampler()
     {
         CaptureCpuBaseline();
-        CaptureNetworkBaseline();
+        _network.Sample();
         _previousTimestamp = Stopwatch.GetTimestamp();
         UpdateMemory();
     }
 
-    // Sample system metrics and resolve the active route before calculating interface rates.
+    // Sample system metrics; network intervals and topology are owned by the physical-interface sampler.
     internal void Sample()
     {
         var now = Stopwatch.GetTimestamp();
@@ -52,8 +48,7 @@ internal sealed class MetricsSampler : IDisposable
 
         UpdateCpu();
         UpdateMemory();
-        RefreshNetworkInterface();
-        UpdateNetwork(elapsedSeconds);
+        _network.Sample();
         GpuPercent = _gpu.Sample();
         _details.Sample(elapsedSeconds);
         _previousTimestamp = now;
@@ -109,109 +104,6 @@ internal sealed class MetricsSampler : IDisposable
             MemoryPercent = status.memoryLoad;
             TotalMemoryBytes = status.totalPhysical;
             UsedMemoryBytes = status.totalPhysical - status.availablePhysical;
-        }
-    }
-
-    private void CaptureNetworkBaseline()
-    {
-        RefreshNetworkInterface();
-        if (TryReadNetworkTotals(out var bytesIn, out var bytesOut))
-        {
-            _previousBytesIn = bytesIn;
-            _previousBytesOut = bytesOut;
-            _hasNetworkBaseline = true;
-        }
-    }
-
-    // Rates require two successful reads from the same adapter; failures invalidate the interval.
-    private void UpdateNetwork(double elapsedSeconds)
-    {
-        if (!TryReadNetworkTotals(out var bytesIn, out var bytesOut))
-        {
-            _hasNetworkBaseline = false;
-            DownloadBytesPerSecond = 0;
-            UploadBytesPerSecond = 0;
-            return;
-        }
-
-        if (_hasNetworkBaseline && bytesIn >= _previousBytesIn && bytesOut >= _previousBytesOut)
-        {
-            DownloadBytesPerSecond = (bytesIn - _previousBytesIn) / elapsedSeconds;
-            UploadBytesPerSecond = (bytesOut - _previousBytesOut) / elapsedSeconds;
-        }
-        else
-        {
-            DownloadBytesPerSecond = 0;
-            UploadBytesPerSecond = 0;
-        }
-
-        _previousBytesIn = bytesIn;
-        _previousBytesOut = bytesOut;
-        _hasNetworkBaseline = true;
-    }
-
-    // Resolve the current route every sample so VPN and Wi-Fi changes do not lag by 30 seconds.
-    private void RefreshNetworkInterface()
-    {
-        if (Native.GetBestInterface(0x08080808, out var interfaceIndex) != 0)
-        {
-            SetActiveInterface(null);
-            return;
-        }
-
-        NetworkInterface? selected = null;
-        foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            try
-            {
-                if (networkInterface.OperationalStatus == OperationalStatus.Up &&
-                    networkInterface.GetIPProperties().GetIPv4Properties()?.Index == interfaceIndex)
-                {
-                    selected = networkInterface;
-                    break;
-                }
-            }
-            catch (NetworkInformationException)
-            {
-                // An interface can disappear while Windows is enumerating adapters.
-            }
-        }
-        SetActiveInterface(selected);
-    }
-
-    private void SetActiveInterface(NetworkInterface? networkInterface)
-    {
-        var newId = networkInterface?.Id ?? string.Empty;
-        if (newId != _activeInterfaceId)
-        {
-            _activeInterfaceId = newId;
-            _hasNetworkBaseline = false;
-            DownloadBytesPerSecond = 0;
-            UploadBytesPerSecond = 0;
-        }
-        _activeInterface = networkInterface;
-    }
-
-    // Read cumulative adapter counters without substituting cached totals when an adapter disappears.
-    private bool TryReadNetworkTotals(out long bytesIn, out long bytesOut)
-    {
-        bytesIn = 0;
-        bytesOut = 0;
-        if (_activeInterface is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            var statistics = _activeInterface.GetIPStatistics();
-            bytesIn = statistics.BytesReceived;
-            bytesOut = statistics.BytesSent;
-            return true;
-        }
-        catch (NetworkInformationException)
-        {
-            return false;
         }
     }
 

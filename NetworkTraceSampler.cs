@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 
@@ -66,7 +67,8 @@ internal sealed class NetworkTraceSampler : IDisposable
         }
     }
 
-    private void OnNetworkEvent(TraceEvent data)
+    // Decode the provider's v0 PID/size/address header and exclude local proxy/server transfers.
+    private unsafe void OnNetworkEvent(TraceEvent data)
     {
         var direction = ((int)data.ID) switch
         {
@@ -74,22 +76,21 @@ internal sealed class NetworkTraceSampler : IDisposable
             11 or 27 or 43 or 59 => -1,
             _ => 0
         };
-        if (direction == 0 || data.PayloadNames.Length < 2)
+        var ipv6 = (int)data.ID is 26 or 27 or 30 or 58 or 59;
+        var addressLength = ipv6 ? 16 : 4;
+        if (direction == 0 || data.Version != 0 || data.EventDataLength < 8 + addressLength * 2)
         {
             return;
         }
 
-        int processId;
-        ulong bytes;
-        try
-        {
-            processId = Convert.ToInt32(data.PayloadValue(0));
-            bytes = Convert.ToUInt64(data.PayloadValue(1));
-        }
-        catch
+        // Addresses are stored in network byte order; spans avoid allocating IPv6 arrays per packet.
+        var payload = new ReadOnlySpan<byte>((void*)data.DataStart, data.EventDataLength);
+        if (IsLoopback(payload.Slice(8, addressLength)) || IsLoopback(payload.Slice(8 + addressLength, addressLength)))
         {
             return;
         }
+        var processId = BinaryPrimitives.ReadInt32LittleEndian(payload);
+        var bytes = BinaryPrimitives.ReadUInt32LittleEndian(payload[4..]);
 
         if (processId <= 0 || bytes == 0 || processId == Environment.ProcessId)
         {
@@ -113,6 +114,18 @@ internal sealed class NetworkTraceSampler : IDisposable
                 counters.Download = unchecked(counters.Download + bytes);
             }
         }
+    }
+
+    // Recognize 127/8, ::1 and IPv4-mapped loopback addresses without allocating IPAddress objects.
+    private static bool IsLoopback(ReadOnlySpan<byte> address)
+    {
+        if (address.Length == 4)
+        {
+            return address[0] == 127;
+        }
+        return BinaryPrimitives.ReadUInt64BigEndian(address) == 0 &&
+            (BinaryPrimitives.ReadUInt64BigEndian(address[8..]) == 1 ||
+             (BinaryPrimitives.ReadUInt32BigEndian(address[8..]) == 0x0000FFFF && address[12] == 127));
     }
 
     internal NetworkProcessUsage[] TakeTop(double elapsedSeconds)
