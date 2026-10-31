@@ -15,7 +15,6 @@ internal sealed class MetricsSampler : IDisposable
     private long _previousBytesIn;
     private long _previousBytesOut;
     private long _previousTimestamp;
-    private int _networkRefreshCountdown;
     private bool _hasNetworkBaseline;
     private bool _disposed;
 
@@ -41,6 +40,7 @@ internal sealed class MetricsSampler : IDisposable
         UpdateMemory();
     }
 
+    // Sample system metrics and resolve the active route before calculating interface rates.
     internal void Sample()
     {
         var now = Stopwatch.GetTimestamp();
@@ -52,6 +52,7 @@ internal sealed class MetricsSampler : IDisposable
 
         UpdateCpu();
         UpdateMemory();
+        RefreshNetworkInterface();
         UpdateNetwork(elapsedSeconds);
         GpuPercent = _gpu.Sample();
         _details.Sample(elapsedSeconds);
@@ -122,15 +123,12 @@ internal sealed class MetricsSampler : IDisposable
         }
     }
 
+    // Rates require two successful reads from the same adapter; failures invalidate the interval.
     private void UpdateNetwork(double elapsedSeconds)
     {
-        if (--_networkRefreshCountdown <= 0)
-        {
-            RefreshNetworkInterface();
-        }
-
         if (!TryReadNetworkTotals(out var bytesIn, out var bytesOut))
         {
+            _hasNetworkBaseline = false;
             DownloadBytesPerSecond = 0;
             UploadBytesPerSecond = 0;
             return;
@@ -152,9 +150,9 @@ internal sealed class MetricsSampler : IDisposable
         _hasNetworkBaseline = true;
     }
 
+    // Resolve the current route every sample so VPN and Wi-Fi changes do not lag by 30 seconds.
     private void RefreshNetworkInterface()
     {
-        _networkRefreshCountdown = 15;
         if (Native.GetBestInterface(0x08080808, out var interfaceIndex) != 0)
         {
             SetActiveInterface(null);
@@ -194,6 +192,7 @@ internal sealed class MetricsSampler : IDisposable
         _activeInterface = networkInterface;
     }
 
+    // Read cumulative adapter counters without substituting cached totals when an adapter disappears.
     private bool TryReadNetworkTotals(out long bytesIn, out long bytesOut)
     {
         bytesIn = 0;
@@ -212,7 +211,6 @@ internal sealed class MetricsSampler : IDisposable
         }
         catch (NetworkInformationException)
         {
-            _networkRefreshCountdown = 0;
             return false;
         }
     }

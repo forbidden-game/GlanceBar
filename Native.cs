@@ -206,6 +206,13 @@ internal static unsafe class Native
         [FieldOffset(8)] internal double doubleValue;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PDH_FMT_COUNTERVALUE_ITEM
+    {
+        internal nint name;
+        internal PDH_FORMATTED_COUNTER_VALUE value;
+    }
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern ushort RegisterClassW(ref WNDCLASS windowClass);
 
@@ -446,18 +453,15 @@ internal static unsafe class Native
     internal static extern uint PdhCloseQuery(nint query);
 
     [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
-    internal static extern uint PdhExpandWildCardPathW(string? dataSource, string wildcardPath,
-        char[]? expandedPathList, ref uint pathListLength, uint flags);
-
-    [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
     internal static extern uint PdhAddEnglishCounterW(nint query, string fullCounterPath, nuint userData, out nint counter);
 
     [DllImport("pdh.dll")]
     internal static extern uint PdhCollectQueryData(nint query);
 
-    [DllImport("pdh.dll")]
-    internal static extern uint PdhGetFormattedCounterValue(nint counter, uint format, out uint type,
-        out PDH_FORMATTED_COUNTER_VALUE value);
+    // Read wildcard instance names and values into a caller-owned buffer sized by the initial null-buffer call.
+    [DllImport("pdh.dll", CharSet = CharSet.Unicode)]
+    internal static extern uint PdhGetFormattedCounterArrayW(nint counter, uint format, ref uint bufferSize,
+        out uint itemCount, nint buffer);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern nint OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, int processId);

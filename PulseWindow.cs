@@ -645,6 +645,7 @@ internal sealed class PulseWindow : IDisposable
         _tooltip?.Update(BuildTooltipContent(_hoverSection), showImmediately);
     }
 
+    // State each metric's scope so interface totals and whole-machine process traffic are not conflated.
     private TooltipContent BuildTooltipContent(HoverSection section)
     {
         switch (section)
@@ -654,7 +655,8 @@ internal sealed class PulseWindow : IDisposable
                 var topLines = new[]
                 {
                     $"网速 · {_metrics.NetworkInterfaceName}",
-                    $"下载 {FormatDetailedRate(_metrics.DownloadBytesPerSecond)}    上传 {FormatDetailedRate(_metrics.UploadBytesPerSecond)}"
+                    $"下载 {FormatDetailedRate(_metrics.DownloadBytesPerSecond)}    上传 {FormatDetailedRate(_metrics.UploadBytesPerSecond)}",
+                    "总速率仅当前网卡；进程流量为全机统计"
                 };
                 if (!_metrics.NetworkDetailsAvailable)
                 {
@@ -675,7 +677,7 @@ internal sealed class PulseWindow : IDisposable
                         process.ProcessId,
                         $"{ShortName(process.Name)}    ↓ {FormatDetailedRate(process.DownloadBytesPerSecond)}    ↑ {FormatDetailedRate(process.UploadBytesPerSecond)}");
                 }
-                return new TooltipContent(topLines, "占用网速", rows);
+                return new TooltipContent(topLines, "全机进程流量（含代理转发）", rows);
             }
 
             case HoverSection.Cpu:
@@ -695,7 +697,8 @@ internal sealed class PulseWindow : IDisposable
                     rows.Add(new TooltipRow(0, "暂无明显 CPU 活动"));
                 }
                 return new TooltipContent(
-                    [$"CPU  {Math.Round(_metrics.CpuPercent)}%    温度  {_cpuTemperatureText.ToString().TrimStart()}"],
+                    [$"CPU  {Math.Round(_metrics.CpuPercent)}%    温度  {_cpuTemperatureText.ToString().TrimStart()}",
+                        "按 CPU 忙碌时间统计（不按频率加权）"],
                     "占用 CPU",
                     rows.ToArray());
             }
@@ -703,8 +706,8 @@ internal sealed class PulseWindow : IDisposable
             case HoverSection.Gpu:
                 return new TooltipContent(
                     [_metrics.GpuPercent < 0
-                        ? "GPU 总利用率  不可用"
-                        : $"GPU 总利用率  {Math.Round(_metrics.GpuPercent)}%"],
+                        ? "GPU 最繁忙引擎  不可用"
+                        : $"GPU 最繁忙引擎  {Math.Round(_metrics.GpuPercent)}%"],
                     null,
                     []);
 
